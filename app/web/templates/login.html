@@ -1,26 +1,117 @@
-<!-- app/web/templates/login.html -->
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Вход</title>
-<link rel="stylesheet" href="/static/app.css"></head>
-<body class="login">
-  <form id="loginForm" class="card">
-    <h3>Вход</h3>
-    <input name="username" placeholder="Логин" required value="user">
-    <input name="password" placeholder="Пароль" type="password" required value="default">
-    <button type="submit">Войти</button>
-    <div id="loginMsg"></div>
-  </form>
-<script>
-document.getElementById('loginForm').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const res = await fetch('/api/login',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({username:fd.get('username'), password:fd.get('password')})
-  });
-  if(res.ok){ location.href='/current'; } else {
-    document.getElementById('loginMsg').textContent = (await res.json()).detail || 'Ошибка';
-  }
-});
-</script>
-</body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Вход</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px;">
+        <h1 style="margin:0; font-size:22px;">Вход</h1>
+        <span class="badge">SMART FID</span>
+      </div>
+      <p class="muted">Укажите логин и пароль, чтобы продолжить.</p>
+
+      <form id="loginForm" class="grid cols-1" novalidate>
+        <div>
+          <label for="username" class="label">Логин</label>
+          <input id="username" name="username" class="input" placeholder="например, user" required value="user">
+        </div>
+
+        <div>
+          <label for="password" class="label">Пароль</label>
+          <div style="position:relative;">
+            <input id="password" name="password" class="input" type="password"
+                   placeholder="пароль" required value="default"
+                   autocomplete="current-password">
+            <button type="button" id="togglePwd"
+                    class="btn btn-ghost"
+                    style="position:absolute; right:6px; top:50%; transform:translateY(-50%); padding:6px 10px;">
+              Показать
+            </button>
+          </div>
+        </div>
+
+        <div id="loginMsg" class="muted" style="min-height:18px;"></div>
+
+        <div class="toolbar" style="justify-content: flex-end; margin-top: 6px;">
+          <button class="btn btn-primary" id="btnLogin" type="submit">Войти</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script>
+  (function(){
+    const $ = (s) => document.querySelector(s);
+    const form = $('#loginForm');
+    const btn  = $('#btnLogin');
+    const msg  = $('#loginMsg');
+    const toast = $('#toast');
+    const pwd  = $('#password');
+    const togglePwd = $('#togglePwd');
+
+    function showToast(text){
+      toast.textContent = text;
+      toast.hidden = false;
+      setTimeout(()=> toast.hidden = true, 2500);
+    }
+
+    togglePwd.addEventListener('click', ()=>{
+      const isPwd = pwd.type === 'password';
+      pwd.type = isPwd ? 'text' : 'password';
+      togglePwd.textContent = isPwd ? 'Скрыть' : 'Показать';
+    });
+
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      msg.textContent = '';
+      btn.disabled = true; btn.textContent = 'Входим…';
+
+      const payload = {
+        username: $('#username').value.trim(),
+        password: pwd.value
+      };
+      if(!payload.username || !payload.password){
+        msg.textContent = 'Заполните логин и пароль';
+        btn.disabled = false; btn.textContent = 'Войти';
+        return;
+      }
+
+      try {
+        // Бьём сразу в новый эндпоинт
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload),
+        });
+
+        if (r.ok) {
+          showToast('Добро пожаловать!');
+          // небольшая задержка, чтобы показать тост
+          setTimeout(()=> location.href = '/current', 200);
+        } else {
+          // попытаемся вытащить detail, иначе просто текст
+          let text = 'Ошибка входа';
+          try {
+            const data = await r.json();
+            text = (data && (data.detail || data.error)) || text;
+          } catch(_){ text = await r.text() || text; }
+          msg.textContent = text;
+          btn.disabled = false; btn.textContent = 'Войти';
+        }
+      } catch(err){
+        msg.textContent = 'Сеть недоступна';
+        btn.disabled = false; btn.textContent = 'Войти';
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

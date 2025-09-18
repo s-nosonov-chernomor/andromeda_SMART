@@ -139,7 +139,7 @@
     </div>
 
     <div class="table-wrap">
-      <table class="table sticky" id="tbl-params">
+      <table class="table" id="tbl-params">
         <thead>
           <tr>
             <th>Линия</th>
@@ -239,11 +239,23 @@
   const toast = qs('#toast');
 
   function showToast(msg){
+    console.warn(msg);
     toast.textContent = msg;
     toast.style.display = 'block';
     setTimeout(()=> toast.style.display = 'none', 2500);
   }
   function fmt(x){ return x==null? '' : String(x); }
+
+  async function apiJson(url, opts={}){
+    const r = await fetch(url, opts);
+    if(!r.ok){
+      const t = await r.text().catch(()=> '');
+      throw new Error(`${r.status} ${r.statusText}${t?': '+t:''}`);
+    }
+    // Пусть /api/settings/save_disk может вернуть {ok:true, backup:...}
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('application/json') ? r.json() : r.text();
+  }
 
   // ───────── enums/state ─────────
   let ENUMS = { register_types:[], param_modes:[], publish_modes:[] };
@@ -251,21 +263,9 @@
   let LINES = [];        // [{name, device, nodes:[{unit_id, object, params:[]}]}, ...]
 
   // ───────── load initial ─────────
-  async function loadEnums(){
-    const r = await fetch('/api/settings/enums');
-    if(!r.ok) throw new Error(await r.text());
-    ENUMS = await r.json();
-  }
-  async function loadGeneral(){
-    const r = await fetch('/api/settings/general');
-    if(!r.ok) throw new Error(await r.text());
-    GENERAL = await r.json();
-  }
-  async function loadLines(){
-    const r = await fetch('/api/settings/lines');
-    if(!r.ok) throw new Error(await r.text());
-    LINES = await r.json();
-  }
+  async function loadEnums(){ ENUMS = await apiJson('/api/settings/enums'); }
+  async function loadGeneral(){ GENERAL = await apiJson('/api/settings/general'); }
+  async function loadLines(){ LINES = await apiJson('/api/settings/lines'); }
 
   // ───────── render: General ─────────
   function renderGeneral(){
@@ -332,10 +332,9 @@
         summary_every_s: +qs('#dbg_summary').value
       }
     };
-    const r = await fetch('/api/settings/general', {
+    await apiJson('/api/settings/general', {
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     });
-    if(!r.ok) throw new Error(await r.text());
     showToast('Общие настройки сохранены');
   }
 
@@ -346,12 +345,14 @@
       LINES.map(ln=> `<option>${ln.name}</option>`).join('');
   }
 
+  function escHtml(s){
+    return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  }
+
   function rowHtml(lineName, unit, object, p){
     const pm = (p.publish_mode || 'on_change');
     return `
       <tr data-line="${lineName}">
-        <td class="mono">${lineName}</td>
-        <td class="mono">${unit}</td>
         <td>${object}</td>
         <td class="mono">${p.name}</td>
         <td class="mono">${p.register_type}</td>
@@ -362,11 +363,19 @@
         <td class="mono">${p.publish_interval_ms ?? 0}</td>
         <td class="mono">${fmt(p.topic)}</td>
         <td class="right">
-          <button class="btn btn-ghost" onclick="openEdit('${lineName}',${unit},'${object}','${p.name.replace(/'/g, "\\'")}')">Ред.</button>
-          <button class="btn btn-danger" onclick="delParam('${lineName}',${unit},'${p.name.replace(/'/g, "\\'")}')">Удалить</button>
+          <button class="btn btn-ghost btn-edit"
+                  data-line="${lineName}"
+                  data-unit="${unit}"
+                  data-object="${object}"
+                  data-name="${p.name}">Ред.</button>
+          <button class="btn btn-danger btn-del"
+                  data-line="${lineName}"
+                  data-unit="${unit}"
+                  data-name="${p.name}">Удалить</button>
         </td>
       </tr>`;
   }
+
 
   function renderParams(){
     const tbody = qs('#tbody-params');
@@ -399,7 +408,10 @@
   function closeModal(){
     modal.setAttribute('aria-hidden', 'true');
     EDIT_CTX = null;
-    // очистим поля, но не enums
+    qs('#m_line').disabled = false;
+    qs('#m_unit').disabled = false;
+    qs('#m_object').disabled = false;
+    // очистка полей
     qs('#m_object').value='';
     qs('#m_name').value='';
     qs('#m_addr').value='';
@@ -407,6 +419,7 @@
     qs('#m_pint').value='0';
     qs('#m_topic').value='';
   }
+
 
   function fillEnumsInModal(){
     const selR = qs('#m_rtype'); selR.innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
@@ -479,25 +492,23 @@
     };
 
     if(MODAL_MODE === 'add'){
-      // простые валидации
-      if(!payload.line || !payload.object || !payload.param.name){ showToast('Заполните: линия, object, имя'); return; }
-      const r = await fetch('/api/settings/param/add', {
+      if(!payload.line || !payload.object || !payload.param.name){
+        showToast('Заполните: линия, object, имя'); return;
+      }
+      await apiJson('/api/settings/param/add', {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
       });
-      if(!r.ok) { showToast('Ошибка добавления: ' + await r.text()); return; }
       showToast('Параметр добавлен');
     }else{
-      // edit — line/unit/name фиксированы; передаём updates=ParamDTO
       const body = {
         line: EDIT_CTX.line,
         unit_id: EDIT_CTX.unit_id,
         name: EDIT_CTX.name,
         updates: payload.param
       };
-      const r = await fetch('/api/settings/param/update', {
+      await apiJson('/api/settings/param/update', {
         method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
       });
-      if(!r.ok) { showToast('Ошибка сохранения: ' + await r.text()); return; }
       showToast('Изменения сохранены');
     }
     closeModal();
@@ -506,52 +517,69 @@
 
   async function delParam(lineName, unitId, name){
     if(!confirm(`Удалить параметр ${name}?`)) return;
-    const r = await fetch('/api/settings/param/delete', {
+    await apiJson('/api/settings/param/delete', {
       method:'DELETE',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ line: lineName, unit_id: +unitId, name })
     });
-    if(!r.ok){ showToast('Ошибка удаления: ' + await r.text()); return; }
     showToast('Удалено');
     await loadLines(); renderFilters(); renderParams();
   }
 
   // expose for inline handlers
-  window.openEdit = openEdit;
-  window.delParam = delParam;
+  // window.openEdit = openEdit;
+  // window.delParam = delParam;
+  window.closeModal = closeModal;
 
   // ───────── toolbar actions ─────────
-  qs('#btn-save-general').onclick = async ()=> { try{ await saveGeneral(); } catch(e){ showToast(String(e)); } };
+  qs('#btn-save-general').onclick = ()=> saveGeneral().catch(e=> showToast(e.message));
   qs('#btn-read-disk').onclick = async ()=>{
-    const r = await fetch('/api/settings/read_disk', {method:'POST'});
-    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
-    await loadGeneral(); await loadLines();
-    renderGeneral(); renderFilters(); renderParams();
-    showToast('Конфиг перечитан с диска');
+    try{
+      await apiJson('/api/settings/read_disk', {method:'POST'});
+      await loadGeneral(); await loadLines();
+      renderGeneral(); renderFilters(); renderParams();
+      showToast('Конфиг перечитан с диска');
+    }catch(e){ showToast(e.message); }
   };
   qs('#btn-save-disk').onclick = async ()=>{
-    const r = await fetch('/api/settings/save_disk', {method:'POST'});
-    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
-    const data = await r.json().catch(()=> ({}));
-    showToast('Записано' + (data.backup? ` (backup: ${data.backup})` : ''));
+    try{
+      const data = await apiJson('/api/settings/save_disk', {method:'POST'});
+      showToast('Записано' + (data && data.backup? ` (backup: ${data.backup})` : ''));
+    }catch(e){ showToast(e.message); }
   };
   qs('#btn-reload').onclick = async ()=>{
-    const r = await fetch('/api/settings/reload', {method:'POST'});
-    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
-    showToast('Линии перезапущены');
+    try{
+      await apiJson('/api/settings/reload', {method:'POST'});
+      showToast('Линии перезапущены');
+    }catch(e){ showToast(e.message); }
   };
 
-  qs('#btn-add-param').onclick = ()=> {
-    qs('#m_line').disabled = false;
-    qs('#m_unit').disabled = false;
-    qs('#m_object').disabled = false;
-    openAdd();
-  };
-  qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(String(e)));
-  function closeModal(){ document.getElementById('modal').setAttribute('aria-hidden','true'); }
+  qs('#btn-add-param').onclick = ()=> { openAdd(); };
+  qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(e.message));
 
   qs('#filter_line').onchange = renderParams;
   qs('#filter_q').oninput = ()=> { renderParams(); };
+
+  // Делегирование кликов по кнопкам в таблице
+  qs('#tbody-params').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+
+    if(btn.classList.contains('btn-edit')){
+      openEdit(
+        btn.dataset.line,
+        +btn.dataset.unit,
+        btn.dataset.object,
+        btn.dataset.name
+      );
+    } else if(btn.classList.contains('btn-del')){
+      delParam(
+        btn.dataset.line,
+        +btn.dataset.unit,
+        btn.dataset.name
+      );
+    }
+  });
 
   // ───────── bootstrap ─────────
   (async function(){
@@ -563,7 +591,7 @@
       renderFilters();
       renderParams();
     }catch(e){
-      showToast('Ошибка инициализации: ' + e);
+      showToast('Ошибка инициализации: ' + e.message);
     }
   })();
 </script>

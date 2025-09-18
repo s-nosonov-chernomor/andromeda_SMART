@@ -3,247 +3,166 @@ from __future__ import annotations
 
 import json
 import os
-import threading
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from datetime import timedelta
+from pathlib import Path
+from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Response, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel
 from passlib.hash import pbkdf2_sha256
 
 from app.core.config import settings
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/web/templates")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Простое файловое хранилище пользователей
-# ─────────────────────────────────────────────────────────────────────────────
+# ── шаблоны ──────────────────────────────────────────────────────────────────
+APP_DIR = Path(__file__).resolve().parents[2]       # .../app
+TEMPLATES_DIR = APP_DIR / "web" / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-_ACCOUNTS_LOCK = threading.Lock()
+# ── путь к файлу пользователей ───────────────────────────────────────────────
+def _accounts_path() -> Path:
+    p = Path(settings.accounts_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
-def _accounts_path() -> str:
-    path = getattr(settings, "accounts_path", None) or "./data/users.json"
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    return path
-
-def _now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
+# ── низкоуровневое хранилище (без рекурсии!) ─────────────────────────────────
 def _load_users() -> Dict[str, Any]:
+    """
+    Безопасно читает users.json.
+    Если файла нет / пуст / битый — возвращает {"users": []}.
+    Битый файл переименовывает в .bak, чтобы не мешал.
+    """
     path = _accounts_path()
-    if not os.path.exists(path):
-        # создать дефолтного пользователя: user / default
-        default_hash = pbkdf2_sha256.hash("default")
-        data = {
-            "updated_at": _now_iso(),
-            "users": {
-                "user": {"hash": default_hash}
-            }
-        }
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+    if not path.exists() or path.stat().st_size == 0:
+        return {"users": []}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or "users" not in data or not isinstance(data["users"], list):
+            return {"users": []}
         return data
-    with open(path, "r", encoding="utf-8") as f:
+    except json.JSONDecodeError:
+        # Бэкапнем кривой файл и начнём с чистого листа
         try:
-            return json.load(f)
+            bkp = path.with_suffix(path.suffix + ".bak")
+            path.replace(bkp)
         except Exception:
-            # сломан файл — сделаем резервную копию и пересоздадим
-            backup = path + ".corrupt." + datetime.utcnow().strftime("%Y%m%d%H%M%S")
-            try:
-                os.replace(path, backup)
-            except Exception:
-                pass
-            return _load_users()
+            pass
+        return {"users": []}
+    except Exception:
+        return {"users": []}
 
 def _save_users(data: Dict[str, Any]) -> None:
     path = _accounts_path()
-    tmp = path + ".tmp"
-    data["updated_at"] = _now_iso()
-    with open(tmp, "w", encoding="utf-8") as f:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    tmp.replace(path)
 
+# ── утилиты ──────────────────────────────────────────────────────────────────
+def _get_user(data: Dict[str, Any], username: str) -> Optional[Dict[str, Any]]:
+    for u in data.get("users", []):
+        if u.get("username") == username:
+            return u
+    return None
+
+# Вызывается из main.py на старте
 def _ensure_default_user() -> None:
-    with _ACCOUNTS_LOCK:
-        data = _load_users()
-        if "users" not in data or not data["users"]:
-            data["users"] = {}
-        if "user" not in data["users"]:
-            data["users"]["user"] = {"hash": pbkdf2_sha256.hash("default")}
-            _save_users(data)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Модели запросов/ответов
-# ─────────────────────────────────────────────────────────────────────────────
-
-class LoginDTO(BaseModel):
-    username: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=1, max_length=256)
-    remember: bool = False
-
-class ChangePasswordDTO(BaseModel):
-    old_password: str = Field(..., min_length=1, max_length=256)
-    new_password: str = Field(..., min_length=6, max_length=256)   # минимальная длина 6
-    confirm_new: str = Field(..., min_length=6, max_length=256)
-
-    @validator("confirm_new")
-    def _match(cls, v, values):
-        if "new_password" in values and v != values["new_password"]:
-            raise ValueError("Пароли не совпадают")
-        return v
-
-class MeDTO(BaseModel):
-    authenticated: bool
-    username: Optional[str] = None
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Сессионные утилиты
-# ─────────────────────────────────────────────────────────────────────────────
-
-SESSION_KEY = "auth_user"  # хранится в request.session
-
-def _require_session(request: Request) -> str:
-    """Возвращает имя пользователя из сессии или бросает 401."""
-    u = request.session.get(SESSION_KEY)
-    if not u:
-        raise HTTPException(401, "not authenticated")
-    return str(u)
-
-def _set_session_login(response: Response, request: Request, username: str, remember: bool):
-    # Starlette SessionMiddleware уже хранит всё в cookie — достаточно записать в request.session.
-    request.session[SESSION_KEY] = username
-    # Продлим cookie (по умолчанию session cookie), если remember=True — зададим max_age
-    if remember:
-        # переустанавливаем cookie с max_age (middleware сам подпишет содержимое)
-        # Нет прямого API изменить max_age у SessionMiddleware здесь — оставим как session cookie.
-        # Если нужен max_age, можно завести собственный cookie-флаг. Для простоты — пропустим.
-        pass
-
-def _clear_session(request: Request):
-    request.session.pop(SESSION_KEY, None)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.post("/api/auth/login")
-def api_login(dto: LoginDTO, request: Request):
-    """
-    Логин: проверка логина/пароля и создание сессии.
-    При первом запуске создаётся user/default.
-    """
-    _ensure_default_user()
-    uname = dto.username.strip()
-    if not uname:
-        raise HTTPException(400, "empty username")
-    uname_key = uname  # чувствительность к регистру — оставим как есть
-
-    with _ACCOUNTS_LOCK:
-        data = _load_users()
-        user = (data.get("users") or {}).get(uname_key)
-        if not user:
-            raise HTTPException(401, "Неверные учетные данные")
-        h = user.get("hash") or ""
-        try:
-            ok = pbkdf2_sha256.verify(dto.password, h)
-        except Exception:
-            ok = False
-        if not ok:
-            raise HTTPException(401, "Неверные учетные данные")
-
-    _set_session_login(Response(), request, uname_key, dto.remember)
-    return {"ok": True, "username": uname_key}
-
-@router.post("/api/auth/logout")
-def api_logout(request: Request):
-    _clear_session(request)
-    return {"ok": True}
-
-@router.get("/api/auth/me", response_model=MeDTO)
-def api_me(request: Request):
-    u = request.session.get(SESSION_KEY)
-    return MeDTO(authenticated=bool(u), username=str(u) if u else None)
-
-@router.post("/api/auth/change_password")
-def api_change_password(dto: ChangePasswordDTO, request: Request, username: str = Depends(_require_session)):
-    """
-    Смена пароля текущего пользователя:
-     - сверяем старый
-     - пишем новый hash в JSON
-    """
-    with _ACCOUNTS_LOCK:
-        data = _load_users()
-        users = data.get("users") or {}
-        user = users.get(username)
-        if not user:
-            raise HTTPException(404, "user not found")
-        old_hash = user.get("hash") or ""
-        if not pbkdf2_sha256.verify(dto.old_password, old_hash):
-            raise HTTPException(400, "Старый пароль неверен")
-        # минимальная политика: длина >=6 уже проверена валидатором
-        new_hash = pbkdf2_sha256.hash(dto.new_password)
-        user["hash"] = new_hash
+    data = _load_users()
+    if _get_user(data, "user") is None:
+        data["users"].append({
+            "username": "user",
+            "password_hash": pbkdf2_sha256.hash("default"),
+        })
         _save_users(data)
 
-    return {"ok": True}
+# dependency для защиты UI
+def _require_session(request: Request) -> str:
+    user = request.session.get("auth_user")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
 
-# ─────────────────────────────────────────────────────────────────────────────
-# UI-роуты (опционально; можно не использовать, если фронт — SPA)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── DTO ──────────────────────────────────────────────────────────────────────
+class LoginDTO(BaseModel):
+    username: str
+    password: str
 
+class ChangePasswordDTO(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_new_password: str
+
+# ── UI: страница логина ──────────────────────────────────────────────────────
 @router.get("/ui/login", response_class=HTMLResponse)
 def ui_login(request: Request):
-    """
-    Простейшая страница логина.
-    Если у тебя есть свой шаблон login.html — он будет отрендерен.
-    Иначе вернём минимальную форму.
-    """
-    template_path = os.path.join("app/web/templates", "login.html")
-    if os.path.exists(template_path):
-        return templates.TemplateResponse("login.html", {"request": request})
-    # Фолбэк: встроенная форма
-    html = """<!doctype html>
-<html lang="ru"><head><meta charset="utf-8">
-<title>Вход</title>
-<link rel="stylesheet" href="/static/andromeda.css">
-</head>
-<body class="auth-wrap">
-  <div class="auth-card">
-    <h1>Вход</h1>
-    <p class="muted">Введите логин и пароль</p>
-    <div class="grid">
-      <label class="label">Логин</label>
-      <input id="u" class="input" placeholder="user" autofocus>
-      <label class="label">Пароль</label>
-      <input id="p" class="input" type="password" placeholder="••••••">
-      <label class="label"><input id="r" type="checkbox"> Запомнить</label>
-      <button class="btn btn-primary" onclick="login()">Войти</button>
-      <div id="e" class="muted"></div>
-    </div>
-  </div>
-<script>
-async function login(){
-  const u = document.getElementById('u').value.trim();
-  const p = document.getElementById('p').value;
-  const r = document.getElementById('r').checked;
-  const e = document.getElementById('e');
-  e.textContent = '';
-  const res = await fetch('/api/auth/login',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({username:u, password:p, remember:r})
-  });
-  if(!res.ok){ e.textContent = 'Ошибка: ' + await res.text(); return; }
-  location.href = '/';
-}
-document.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') login(); });
-</script>
-</body></html>"""
-    return HTMLResponse(html)
+    return templates.TemplateResponse("login.html", {"request": request, "title": "Вход"})
 
-@router.get("/ui/logout")
-def ui_logout(request: Request):
-    _clear_session(request)
-    return RedirectResponse(url="/ui/login", status_code=302)
+# ── API: логин / логаут / смена пароля ───────────────────────────────────────
+@router.post("/api/auth/login")
+async def login(request: Request):
+    # принимаем JSON или form-data
+    data = _load_users()
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+    else:
+        form = await request.form()
+        payload = dict(form)
+
+    try:
+        dto = LoginDTO(**payload)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad payload")
+
+    user = _get_user(data, dto.username)
+    if not user or not pbkdf2_sha256.verify(dto.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Не верный логин или пароль")
+
+    # сессия на 1 день
+    request.session["auth_user"] = dto.username
+    request.session["auth_until"] = (timedelta(days=1)).total_seconds()
+    return {"ok": True, "user": dto.username}
+
+@router.post("/api/auth/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
+@router.post("/api/auth/change_password")
+async def change_password(request: Request):
+    user = _require_session(request)
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+    else:
+        form = await request.form()
+        payload = dict(form)
+
+    try:
+        dto = ChangePasswordDTO(**payload)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad payload")
+
+    if dto.new_password != dto.confirm_new_password:
+        raise HTTPException(status_code=400, detail="Password confirmation mismatch")
+
+    data = _load_users()
+    u = _get_user(data, user)
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not pbkdf2_sha256.verify(dto.old_password, u.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Old password is incorrect")
+
+    u["password_hash"] = pbkdf2_sha256.hash(dto.new_password)
+    _save_users(data)
+    return {"ok": True}
+
+# ── экспорт зависимостей для main.py ─────────────────────────────────────────
+# чтобы совпадали имена из твоего main.py
+ensure_default_user = _ensure_default_user
+require_session = _require_session

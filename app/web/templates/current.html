@@ -1,32 +1,283 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Текущие</h2>
-<table id="tblCurrent">
-  <thead><tr>
-    <th>Объект</th><th>Параметр</th><th>Значение</th><th>Код</th><th>Описание</th>
-    <th>Линия</th><th>Unit</th><th>Тип</th><th>Адрес</th>
-  </tr></thead>
-  <tbody></tbody>
-</table>
+<style>
+@keyframes flashRow { 0% { background:#fff7cc; } 100% { background:transparent; } }
+tr.changed { animation: flashRow 900ms ease-in-out; }
+/* липкий хедер убираем, поэтому правило .table.sticky нам больше не нужно */
+.table-wrap { overflow: auto; }
+</style>
+
+<h2 style="margin:6px 0 14px;">Текущие</h2>
+
+<div class="card">
+  <div class="toolbar" style="justify-content: space-between;">
+    <form id="searchBar" role="search" autocomplete="off" onsubmit="return false;" class="filters" style="gap:10px;">
+      <input id="fltText" class="input" type="search" name="q_search"
+             inputmode="search" style="width:260px"
+             placeholder="Поиск: объект / параметр"
+             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <select id="fltLine" class="select" style="width:160px">
+        <option value="">Линия: все</option>
+      </select>
+      <select id="fltObject" class="select" style="width:200px">
+        <option value="">Объект: все</option>
+      </select>
+      <select id="fltCode" class="select" style="width:180px">
+        <option value="">Статус: любой</option>
+        <option value="ok">OK</option>
+        <option value="err">Ошибка</option>
+        <option value="null">Нет значения</option>
+      </select>
+    </form>
+
+    <div class="filters">
+      <span id="updInfo" class="badge">—</span>
+      <select id="autoEvery" class="select" style="width:140px">
+        <option value="2000">каждые 2s</option>
+        <option value="5000">каждые 5s</option>
+        <option value="10000">каждые 10s</option>
+        <option value="0">ручной режим</option>
+      </select>
+      <button class="btn btn-ghost" id="btnRefresh" type="button">Обновить</button>
+      <button class="btn btn-primary" id="btnPause" type="button">Пауза</button>
+    </div>
+  </div>
+
+
+  <div class="table-wrap">
+    <!-- главная правка: убрали класс 'sticky' -->
+    <table id="tblCurrent" class="table mono">
+      <thead>
+        <tr>
+          <th>Объект</th>
+          <th>Параметр</th>
+          <th>Значение</th>
+          <th>Статус</th>
+          <th>Описание</th>
+          <th class="right">Линия</th>
+          <th class="right">Unit</th>
+          <th>Тип</th>
+          <th class="right">Адрес</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="footer">Если значение отсутствует, показываем <span class="badge">null</span> и код/описание ошибки.</div>
+</div>
+
 <script>
-async function loadCurrent(){
-  const r = await fetch('/api/current'); const data = await r.json();
-  const tb = document.querySelector('#tblCurrent tbody'); tb.innerHTML='';
-  for(const x of data){
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${x.object}</td>
-      <td>${x.param}</td>
-      <td>${x.value===null? '<i>null</i>': x.value}</td>
-      <td>${x.code}</td>
-      <td>${x.message||''}</td>
-      <td>${x.line}</td>
-      <td>${x.unit_id}</td>
-      <td>${x.register_type}</td>
-      <td>${x.address}</td>`;
-    tb.appendChild(tr);
+(function(){
+  const $ = (s)=>document.querySelector(s);
+  const tb = $('#tblCurrent tbody');
+  const updInfo = $('#updInfo');
+  const btnRefresh = $('#btnRefresh');
+  const btnPause = $('#btnPause');
+  const selEvery = $('#autoEvery');
+  const fltText = $('#fltText');
+  const fltLine = $('#fltLine');
+  const fltObject = $('#fltObject');
+  const fltCode = $('#fltCode');
+
+  let timer = null;
+  let everyMs = parseInt(selEvery.value, 10);
+  let paused = false;
+
+  const lastValues = new Map(); // key -> last value
+  let lastData = [];
+
+  // Кэш наборов для селектов, чтобы не пересобирать без нужды
+  let cachedLines = new Set();
+  let cachedObjects = new Set();
+
+  const keyOf = (x) => `${safeStr(x.object)}|${safeStr(x.param)}`;
+
+  function safeStr(v) {
+    return v === null || v === undefined ? '' : String(v);
   }
-}
-loadCurrent(); setInterval(loadCurrent, 2000);
+
+  function fmtTime(d=new Date()){
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+
+  function statusChip(item){
+    const codeNum = Number(item.code ?? 0);
+    const isNull = (item.value === null || item.value === undefined);
+    const cls = isNull ? 'warn' : (codeNum === 0 ? 'ok' : 'err');
+    const text = isNull ? 'нет данных' : (codeNum === 0 ? 'ok' : `err ${codeNum}`);
+    return `<span class="status ${cls}">${text}</span>`;
+  }
+
+  function valCell(x){
+    if (x.value === null || x.value === undefined) {
+      return `<span class="muted"><i>null</i></span>`;
+    }
+    return `${x.value}`;
+  }
+
+  // Мягкие фильтры, не отбрасываем неизвестные/пустые значения
+  function applyFilters(list){
+    const q = safeStr(fltText.value).trim().toLowerCase();
+    const lineSel = safeStr(fltLine.value);
+    const objSel  = safeStr(fltObject.value);
+    const codeMode = safeStr(fltCode.value);
+
+    return list.filter(x=>{
+      const obj = safeStr(x.object), prm = safeStr(x.param);
+      const line = safeStr(x.line);
+      const codeNum = Number(x.code ?? 0);
+      const isNull = (x.value === null || x.value === undefined);
+
+      if (q && !(obj.toLowerCase().includes(q) || prm.toLowerCase().includes(q))) return false;
+      if (lineSel && line !== lineSel) return false;
+      if (objSel && obj !== objSel) return false;
+
+      if (codeMode === 'ok'   && !(codeNum === 0 && !isNull)) return false;
+      if (codeMode === 'err'  && !(codeNum !== 0)) return false;
+      if (codeMode === 'null' && !isNull) return false;
+
+      return true;
+    });
+  }
+
+  // Пересобираем селекты только если наборы реально изменились
+  function rebuildFiltersIfNeeded(list){
+    const lines = new Set();
+    const objs = new Set();
+    for (const x of list) {
+      const l = safeStr(x.line);
+      const o = safeStr(x.object);
+      if (l) lines.add(l);
+      if (o) objs.add(o);
+    }
+
+    const sameLines = setsEqual(lines, cachedLines);
+    const sameObjs  = setsEqual(objs, cachedObjects);
+
+    if (!sameLines) {
+      const cur = fltLine.value;
+      fltLine.innerHTML = `<option value="">Линия: все</option>` +
+        [...lines].sort().map(v=>`<option value="${v}">${v}</option>`).join('');
+      // если текущее значение всё ещё есть — восстанавливаем
+      if (!cur || lines.has(cur)) fltLine.value = cur;
+      cachedLines = lines;
+    }
+
+    if (!sameObjs) {
+      const cur = fltObject.value;
+      fltObject.innerHTML = `<option value="">Объект: все</option>` +
+        [...objs].sort().map(v=>`<option value="${v}">${v}</option>`).join('');
+      if (!cur || objs.has(cur)) fltObject.value = cur;
+      cachedObjects = objs;
+    }
+  }
+
+  function setsEqual(a, b){
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
+  }
+
+  function render(list){
+    // стабильная сортировка (объект → параметр)
+    const sorted = [...list].sort((a,b)=>{
+      const ao = safeStr(a.object), bo = safeStr(b.object);
+      if (ao < bo) return -1; if (ao > bo) return 1;
+      const ap = safeStr(a.param), bp = safeStr(b.param);
+      if (ap < bp) return -1; if (ap > bp) return 1;
+      return 0;
+    });
+
+    const filtered = applyFilters(sorted);
+    tb.innerHTML = '';
+
+    for (const x of filtered) {
+      const key = keyOf(x);
+      const prev = lastValues.get(key);
+      const changed = (prev !== undefined && prev !== x.value);
+
+      const tr = document.createElement('tr');
+      if (changed) tr.classList.add('changed');
+
+      tr.innerHTML = `
+        <td>${safeStr(x.object)}</td>
+        <td>${safeStr(x.param)}</td>
+        <td>${valCell(x)}</td>
+        <td>${statusChip(x)}</td>
+        <td>${safeStr(x.message)}</td>
+        <td class="right">${safeStr(x.line)}</td>
+        <td class="right">${safeStr(x.unit_id)}</td>
+        <td>${safeStr(x.register_type)}</td>
+        <td class="right">${safeStr(x.address)}</td>
+      `;
+      tb.appendChild(tr);
+
+      lastValues.set(key, x.value);
+    }
+
+    updInfo.textContent = `Обновлено: ${fmtTime()} • всего: ${list.length} • показано: ${filtered.length}`;
+  }
+
+  async function load(){
+    try{
+      const r = await fetch('/api/current', {cache:'no-store'});
+      if(!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      lastData = Array.isArray(data) ? data : [];
+      rebuildFiltersIfNeeded(lastData);
+      render(lastData);
+    }catch(e){
+      updInfo.textContent = 'Ошибка загрузки';
+      console.error(e);
+    }
+  }
+
+  function reschedule(){
+    if (timer) clearInterval(timer);
+    if (!paused && everyMs > 0) {
+      timer = setInterval(load, everyMs);
+    }
+  }
+
+  // events
+  btnRefresh.addEventListener('click', load);
+  selEvery.addEventListener('change', ()=>{
+    everyMs = parseInt(selEvery.value, 10) || 0;
+    reschedule();
+  });
+  btnPause.addEventListener('click', ()=>{
+    paused = !paused;
+    btnPause.textContent = paused ? 'Возобновить' : 'Пауза';
+    reschedule();
+  });
+
+  [fltText, fltLine, fltObject, fltCode].forEach(el=>{
+    el.addEventListener('input', ()=> render(lastData));
+    el.addEventListener('change', ()=> render(lastData));
+  });
+
+  // init
+
+  const searchEl = document.getElementById('fltText');
+
+  // помечаем, что пользователь сам что-то печатал
+  searchEl.addEventListener('input', () => { searchEl.dataset.userTyped = '1'; }, { once: true });
+
+  // аккуратно чистим то, что подставил браузер
+  const clearAutofill = () => {
+    if (searchEl && searchEl.value && !searchEl.dataset.userTyped) {
+      searchEl.value = '';
+      searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
+  // два таймаута — на случай, если менеджер паролей заполняет позже
+  setTimeout(clearAutofill, 80);
+  setTimeout(clearAutofill, 300);
+
+  load();
+  reschedule();
+
+})();
 </script>
 {% endblock %}

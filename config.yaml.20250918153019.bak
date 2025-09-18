@@ -1,22 +1,22 @@
 debug:
   enabled: true
-  log_reads: false
-  summary_every_s: 20
+  log_reads: true
+  summary_every_s: 10
 mqtt:
   host: 127.0.0.1
   port: 1883
+  client_id: uspd-modbus-gw
   base_topic: /devices
   qos: 0
   retain: false
-  client_id: uspd-modbus-gw
 db:
   url: sqlite:///./data/data.db
 polling:
   interval_ms: 1000
   jitter_ms: 120
-  backoff_ms: 500
+  no_response_increment: 1
   max_errors_before_backoff: 5
-  port_retry_backoff_s: 5
+  backoff_ms: 500
   batch_read:
     enabled: true
     max_bits: 64
@@ -50,7 +50,11 @@ lines:
       publish_mode: on_change_and_interval
       publish_interval_ms: 5000
       topic: site1/room2/io/q3
-history:
-  max_rows: 50000
-  ttl_days: 14
-  cleanup_every: 500
+    - name: q4
+      register_type: coil
+      address: 1003
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 5000
+      topic: null

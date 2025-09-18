@@ -1,101 +1,115 @@
 # app/core/config.py
 from __future__ import annotations
 
-import os
+import shutil
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict
 
 import yaml
 from pydantic import Field, PrivateAttr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """
-    Глобальные настройки приложения + «мост» к YAML-конфигу USPD.
-    - Значения можно переопределять переменными окружения
-      (SESSION_SECRET, ACCOUNTS_PATH, USPD_CFG, ANDROMEDA_CFG, WEB_PORT).
-    - YAML конфиг читается методом load_yaml_config(); его части попадают в .debug и ._runtime_cfg.
-    """
+    # секрет для cookie-сессий
+    session_secret: str = Field(default="change-me-please")
 
-    # ---- web/auth ----
-    session_secret: str = Field("CHANGE_ME_TO_RANDOM_LONG_SECRET", alias="SESSION_SECRET")
-    accounts_path: str = Field("./data/users.json", alias="ACCOUNTS_PATH")
-    web_port: int = Field(8080, alias="WEB_PORT")
+    # путь к основному YAML (можно переопределить переменной окружения CONFIG_FILE)
+    config_file: str = Field(default="config.yaml", validation_alias="CONFIG_FILE")
 
-    # ---- пути к конфигаам ----
-    uspd_cfg_path: str = Field("./config.yaml", alias="USPD_CFG")
-    andromeda_cfg_path: str = Field("./andromeda.yaml", alias="ANDROMEDA_CFG")
+    # путь к файлу пользователей (можно переопределить переменной окружения ACCOUNTS_FILE)
+    accounts_file: str = Field(default="data/accounts.json", validation_alias="ACCOUNTS_FILE")
 
-    # ---- часть из YAML (подхватываем в load_yaml_config) ----
-    debug: Dict[str, Any] = Field(default_factory=lambda: {
-        "enabled": False,
-        "log_reads": False,
-        "summary_every_s": 0,
-    })
+    # внутреннее хранилище загруженного YAML
+    _cfg: Dict[str, Any] = PrivateAttr(default_factory=dict)
+    _config_path: Path | None = PrivateAttr(default=None)
+    _accounts_path: Path | None = PrivateAttr(default=None)
 
-    # приватное хранилище текущего YAML
-    _runtime_cfg: Dict[str, Any] = PrivateAttr(default_factory=dict)
+    # ───────── пути ─────────
+    @property
+    def config_path(self) -> Path:
+        if self._config_path is None:
+            p = Path(self.config_file)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            self._config_path = p
+        return self._config_path
 
-    # pydantic v2 конфиг
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+    # для совместимости со старым кодом
+    @property
+    def cfg_path(self) -> str:
+        return str(self.config_path)
 
-    # ───────────────────────── helpers ─────────────────────────
+    @property
+    def accounts_path(self) -> str:
+        """Абсолютный путь к JSON с пользователями; гарантируем наличие директории."""
+        if self._accounts_path is None:
+            p = Path(self.accounts_file)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            p.parent.mkdir(parents=True, exist_ok=True)
+            self._accounts_path = p
+        return str(self._accounts_path)
 
-    def load_yaml_config(self) -> Dict[str, Any]:
-        """
-        Читает YAML из self.uspd_cfg_path, кладёт в _runtime_cfg и подхватывает .debug, если есть.
-        Возвращает словарь конфига.
-        """
-        path = self.uspd_cfg_path
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            data = {}
-        except Exception as e:
-            # не падаем на старте — просто возвращаем пустой конфиг
-            print(f"[settings] YAML read error {path}: {e}")
-            data = {}
-
-        # сохранить целиком
-        self._runtime_cfg = data
-
-        # подхватить debug из YAML (если есть)
-        dbg = (data.get("debug") or {}) if isinstance(data, dict) else {}
-        if isinstance(dbg, dict) and dbg:
-            # не затираем целиком, а обновляем дефолт
-            merged = dict(self.debug)
-            merged.update(dbg)
-            self.debug = merged
-
-        return data
+    # ───────── YAML cfg ─────────
+    @property
+    def cfg(self) -> Dict[str, Any]:
+        return self._cfg
 
     def get_cfg(self) -> Dict[str, Any]:
-        """Копия последнего загруженного YAML-конфига."""
-        return dict(self._runtime_cfg)
+        return self._cfg
 
-    # Удобные геттеры, чтобы не падать, если в YAML нет секций
-    @property
-    def polling(self) -> Dict[str, Any]:
-        return (self._runtime_cfg.get("polling") or {}) if isinstance(self._runtime_cfg, dict) else {}
+    def set_cfg(self, data: Dict[str, Any]) -> None:
+        self._cfg = data or {}
 
+    def load_yaml_config(self) -> None:
+        p = self.config_path
+        if p.exists():
+            with open(p, "r", encoding="utf-8") as f:
+                self._cfg = yaml.safe_load(f) or {}
+        else:
+            self._cfg = {}
+
+    def save_yaml_config(self, data: Dict[str, Any]) -> str:
+        """Сохраняет YAML и делает .bak; возвращает имя бэкапа или ''."""
+        self._cfg = data or {}
+        p = self.config_path
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        backup_name = ""
+        if p.exists():
+            ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            backup = p.with_suffix(p.suffix + f".{ts}.bak")
+            shutil.copy2(p, backup)
+            backup_name = backup.name
+
+        with open(p, "w", encoding="utf-8") as f:
+            yaml.safe_dump(self._cfg, f, allow_unicode=True, sort_keys=False)
+
+        return backup_name
+
+    # ───────── удобные секции ─────────
     @property
     def mqtt(self) -> Dict[str, Any]:
-        return (self._runtime_cfg.get("mqtt") or {}) if isinstance(self._runtime_cfg, dict) else {}
+        return self._cfg.get("mqtt", {})
+
+    @property
+    def polling(self) -> Dict[str, Any]:
+        return self._cfg.get("polling", {})
 
     @property
     def history(self) -> Dict[str, Any]:
-        return (self._runtime_cfg.get("history") or {}) if isinstance(self._runtime_cfg, dict) else {}
+        return self._cfg.get("history", {})
 
     @property
-    def lines(self) -> Any:
-        return (self._runtime_cfg.get("lines") or []) if isinstance(self._runtime_cfg, dict) else []
+    def debug(self) -> Dict[str, Any]:
+        return self._cfg.get("debug", {})
+
+    @property
+    def db_url(self) -> str:
+        # дефолт «как раньше»
+        return self._cfg.get("db", {}).get("url", "sqlite:///./data/data.db")
 
 
-# единый синглтон
 settings = Settings()

@@ -50,6 +50,14 @@ lines:
       publish_mode: on_change_and_interval
       publish_interval_ms: 5000
       topic: site1/room2/io/q3
+    - name: q4
+      register_type: coil
+      address: 1005
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 5000
+      topic: null
 history:
   max_rows: 50000
   ttl_days: 14

@@ -248,3 +248,18 @@ a:hover { text-decoration: none; }
 .footer{
   color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0 36px;
 }
+
+:root{ --nav-h: 56px; } /* дефолт на случай, если JS не успеет */
+
+.table-wrap{
+  overflow: auto;
+  max-height: 65vh;            /* чтобы был собственный скролл у таблицы */
+}
+
+/* липкая шапка таблицы с учётом высоты топ-меню */
+.table.sticky thead th{
+  position: sticky;
+  top: calc(var(--nav-h) + 10px);  /* 10px — небольшой отступ под меню */
+  z-index: 2;
+  background: var(--surface);
+}

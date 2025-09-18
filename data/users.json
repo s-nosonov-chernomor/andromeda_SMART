@@ -1,0 +1,8 @@
+{
+  "users": [
+    {
+      "username": "user",
+      "password_hash": "$pbkdf2-sha256$29000$YQwBIKQ0JmSsNeYcg1BKyQ$leDWuT1s9PWhr.VRnJDG76LV8l8KfuHA9b9fWGPy0Zw"
+    }
+  ]
+}

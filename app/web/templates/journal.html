@@ -1,59 +1,404 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Журнал</h2>
-<div class="filters">
-  <input id="fObject" placeholder="object">
-  <input id="fParam" placeholder="param">
-  <input id="fLine" placeholder="line">
-  <input id="fTopic" placeholder="topic">
-  <input id="fSince" type="number" placeholder="since_s">
-  <select id="fHasValue"><option value="">value?</option><option value="1">есть</option><option value="0">null</option></select>
-  <button id="btnApply">Применить</button>
+<style>
+  .table-wrap{ overflow:auto; }
+  .empty{ padding:24px; text-align:center; color:var(--muted); }
+  .errbar{ margin:8px 0 0; color:#a40f3d; }
+  .soft{ color:var(--muted); font-size:12px; }
+  .nowrap{ white-space:nowrap; }
+  @keyframes flashRow { 0%{ background:#fff7cc; } 100%{ background:transparent; } }
+  tr.changed{ animation: flashRow 900ms ease-in-out; }
+</style>
+
+<h2 style="margin:6px 0 14px;">Журнал</h2>
+
+<div class="card">
+  <!-- Фильтры / инструменты -->
+  <div class="toolbar" style="justify-content:space-between; align-items:end;">
+    <div class="filters" style="gap:10px; align-items:end;">
+      <div>
+        <div class="label">Поиск (object / param / topic / текст)</div>
+        <input id="fQ" class="input" style="width:260px" type="search"
+               placeholder="Например: object1_io или q1"
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div>
+        <div class="label">Линия</div>
+        <select id="fLine" class="select" style="width:160px">
+          <option value="">все</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">Объект</div>
+        <select id="fObject" class="select" style="width:180px">
+          <option value="">все</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">Параметр</div>
+        <select id="fParam" class="select" style="width:180px">
+          <option value="">все</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">Статус</div>
+        <select id="fStatus" class="select" style="width:160px">
+          <option value="">любой</option>
+          <option value="ok">OK</option>
+          <option value="err">Ошибка</option>
+          <option value="null">Нет значения</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">За последние</div>
+        <select id="fSince" class="select" style="width:140px">
+          <option value="0">всё</option>
+          <option value="300">5 минут</option>
+          <option value="900">15 минут</option>
+          <option value="3600">1 час</option>
+          <option value="86400">24 часа</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">Лимит</div>
+        <select id="fLimit" class="select" style="width:120px">
+          <option value="100">100</option>
+          <option value="200" selected>200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="filters">
+      <span id="meta" class="badge">—</span>
+      <button class="btn btn-ghost" id="btnRefresh" type="button">Обновить</button>
+      <button class="btn btn-primary" id="btnPause" type="button">Пауза</button>
+      <button class="btn btn-ghost" id="btnCsv" type="button" title="Экспорт CSV">CSV</button>
+      <select id="autoEvery" class="select" style="width:140px">
+        <option value="5000" selected>каждые 5s</option>
+        <option value="10000">каждые 10s</option>
+        <option value="30000">каждые 30s</option>
+        <option value="0">ручной режим</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="err" class="errbar" style="display:none;"></div>
+
+  <!-- Таблица -->
+  <div class="table-wrap">
+    <table id="tbl" class="table mono">
+      <thead>
+        <tr>
+          <th data-k="ts" class="nowrap">Время</th>
+          <th data-k="object">Объект</th>
+          <th data-k="param">Параметр</th>
+          <th data-k="value">Значение</th>
+          <th data-k="code" class="nowrap">Статус</th>
+          <th data-k="message">Описание</th>
+          <th data-k="line" class="nowrap">Линия</th>
+          <th data-k="unit_id" class="nowrap">Unit</th>
+          <th data-k="register_type" class="nowrap">Тип</th>
+          <th data-k="address" class="nowrap">Адрес</th>
+          <th data-k="topic">Топик</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="empty" class="empty" style="display:none;">Записей нет.</div>
+  </div>
+
+  <div class="soft" style="margin-top:8px;">
+    Показано: <span id="shown">0</span> • Получено: <span id="total">0</span> • Обновлено: <span id="upd">—</span>
+  </div>
 </div>
-<table id="tblEvents">
-  <thead><tr>
-    <th data-k="ts">Время</th>
-    <th data-k="object">Объект</th>
-    <th data-k="param">Парам</th>
-    <th data-k="value">Знач</th>
-    <th data-k="code">Код</th>
-    <th data-k="message">Текст</th>
-    <th data-k="line">Линия</th>
-    <th data-k="unit_id">Unit</th>
-    <th data-k="register_type">Тип</th>
-    <th data-k="address">Адрес</th>
-  </tr></thead>
-  <tbody></tbody>
-</table>
+
 <script>
-let sortKey='ts';
-async function loadEvents(){
-  const q = new URLSearchParams();
-  const gv = id => document.getElementById(id).value.trim();
-  if(gv('fObject')) q.set('object', gv('fObject'));
-  if(gv('fParam'))  q.set('param', gv('fParam'));
-  if(gv('fLine'))   q.set('line', gv('fLine'));
-  if(gv('fTopic'))  q.set('topic', gv('fTopic'));
-  if(gv('fSince'))  q.set('since_s', gv('fSince'));
-  if(gv('fHasValue')!=='') q.set('has_value', gv('fHasValue'));
-  q.set('limit','500');
-  const r = await fetch('/api/events?'+q.toString()); const data = await r.json();
-  data.sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1));
-  const tb = document.querySelector('#tblEvents tbody'); tb.innerHTML='';
-  for(const e of data){
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${e.ts}</td><td>${e.object}</td><td>${e.param}</td>
-      <td>${e.value===null?'<i>null</i>':e.value}</td>
-      <td>${e.code}</td><td>${e.message||''}</td>
-      <td>${e.line}</td><td>${e.unit_id}</td><td>${e.register_type}</td><td>${e.address}</td>`;
-    tb.appendChild(tr);
+(function(){
+  "use strict";
+
+  function $(s){ return document.querySelector(s); }
+  function $all(s){ return document.querySelectorAll(s); }
+
+  var tb   = $('#tbl tbody');
+  var meta = $('#meta');
+  var err  = $('#err');
+  var upd  = $('#upd');
+  var total= $('#total');
+  var shown= $('#shown');
+
+  var btnRefresh = $('#btnRefresh');
+  var btnPause   = $('#btnPause');
+  var btnCsv     = $('#btnCsv');
+  var autoEvery  = $('#autoEvery');
+
+  var fQ = $('#fQ');
+  var fLine = $('#fLine');
+  var fObject = $('#fObject');
+  var fParam = $('#fParam');
+  var fStatus = $('#fStatus');
+  var fSince  = $('#fSince');
+  var fLimit  = $('#fLimit');
+
+  var timer=null, paused=false, everyMs=parseInt(autoEvery.value,10) || 0;
+  var sortKey = 'ts', sortDir = -1; // новые сверху
+  var rawData = [];
+  var lastRowKey = new Map();
+
+  function fetchJson(url){
+    return fetch(url, {cache:'no-store'}).then(function(r){
+      if(!r.ok) return r.text().then(function(t){ throw new Error(t || ('HTTP '+r.status)); });
+      return r.json();
+    });
   }
-}
-document.getElementById('btnApply').onclick = loadEvents;
-document.querySelectorAll('#tblEvents thead th').forEach(th=>{
-  th.onclick=()=>{sortKey=th.dataset.k||sortKey; loadEvents();};
-});
-loadEvents(); setInterval(loadEvents, 5000);
+
+  function fetchEvents(params){
+    var qs = new URLSearchParams(params).toString();
+    var endpoints = ['/api/journal/events','/api/events'];
+    var idx = 0;
+
+    function tryNext(lastErr){
+      if(idx >= endpoints.length){
+        return Promise.reject(new Error(lastErr || 'Нет ответа от сервера'));
+      }
+      var ep = endpoints[idx++];
+      return fetchJson(ep + '?' + qs).catch(function(e){ return tryNext(e && e.message); });
+    }
+    return tryNext();
+  }
+
+  function buildServerParams(){
+    var p = {};
+    var q = (fQ.value||'').trim();
+    if(q) p.q = q;
+
+    if(fLine.value)   p.line   = fLine.value;
+    if(fObject.value) p.object = fObject.value;
+    if(fParam.value)  p.param  = fParam.value;
+
+    var since = parseInt(fSince.value||'0',10);
+    if(since>0) p.since_s = since;
+
+    var st = fStatus.value;
+    if(st==='null'){ p.has_value = 0; }
+    if(st==='ok'){   p.code_max = 0; p.has_value = 1; }
+    if(st==='err'){  p.code_min = 1; }
+
+    var limit = parseInt(fLimit.value||'200',10);
+    p.limit = limit;
+    return p;
+  }
+
+  function applyClientFilters(list){
+    var q = (fQ.value||'').trim().toLowerCase();
+    var st = fStatus.value;
+
+    return list.filter(function(e){
+      if(q){
+        var hay = [
+          e.object||'', e.param||'', e.topic||'', e.message||''
+        ].join(' ').toLowerCase();
+        if(hay.indexOf(q) === -1) return false;
+      }
+      if(st){
+        var isNull = (e.value===null || typeof e.value==="undefined");
+        var ok = Number(e.code||0)===0 && !isNull;
+        if(st==='null' && !isNull) return false;
+        if(st==='ok'   && !ok) return false;
+        if(st==='err'  && !(Number(e.code||0)!==0)) return false;
+      }
+      return true;
+    });
+  }
+
+  function toLocalTs(ts){
+    try{
+      var d = new Date(ts);
+      if(isNaN(d.getTime())) return ts;
+      return d.toLocaleString();
+    }catch(_){ return ts; }
+  }
+
+  function statusChip(e){
+    var code = Number(e.code||0);
+    var isNull = (e.value===null || typeof e.value==="undefined");
+    var cls = isNull ? 'warn' : (code===0 ? 'ok' : 'err');
+    var text = isNull ? 'нет данных' : (code===0 ? 'OK' : ('err '+code));
+    return '<span class="status '+cls+'">'+text+'</span>';
+  }
+
+  function keyOf(e){
+    return (e.id ? String(e.id) : '') + '|' + (e.ts||'') + '|' + (e.object||'') + '|' + (e.param||'');
+  }
+
+  function render(list){
+    var sorted = list.slice().sort(function(a,b){
+      var A = a[sortKey], B = b[sortKey];
+      if (A===B) return 0;
+      return (A>B ? 1 : -1) * sortDir;
+    });
+
+    tb.innerHTML = '';
+    var count = 0;
+    for(var i=0;i<sorted.length;i++){
+      var e = sorted[i];
+      var tr = document.createElement('tr');
+
+      var key = keyOf(e);
+      var prevV = lastRowKey.has(key) ? lastRowKey.get(key) : undefined;
+      var nowV  = e.value;
+      if(prevV!==undefined && prevV!==nowV) tr.classList.add('changed');
+      lastRowKey.set(key, nowV);
+
+      tr.innerHTML =
+        '<td class="nowrap">'+toLocalTs(e.ts)+'</td>'+
+        '<td>'+(e.object||'')+'</td>'+
+        '<td>'+(e.param||'')+'</td>'+
+        '<td>'+( (e.value===null || typeof e.value==="undefined") ? '<i class="muted">null</i>' : e.value )+'</td>'+
+        '<td class="nowrap">'+statusChip(e)+'</td>'+
+        '<td>'+(e.message||'')+'</td>'+
+        '<td class="right nowrap">'+(e.line||'')+'</td>'+
+        '<td class="right nowrap">'+( (typeof e.unit_id==="undefined")? '' : e.unit_id )+'</td>'+
+        '<td class="nowrap">'+(e.register_type||'')+'</td>'+
+        '<td class="right nowrap">'+( (typeof e.address==="undefined")? '' : e.address )+'</td>'+
+        '<td class="mono">'+(e.topic||'')+'</td>';
+
+      tb.appendChild(tr);
+      count++;
+    }
+
+    $('#empty').style.display = count ? 'none' : 'block';
+    shown.textContent = String(count);
+    total.textContent = String(rawData.length);
+    upd.textContent = new Date().toLocaleTimeString();
+  }
+
+  function uniq(arr){
+    var set = Object.create(null);
+    var out = [];
+    for(var i=0;i<arr.length;i++){
+      var v = arr[i];
+      if(!v) continue;
+      if(!set[v]){ set[v]=1; out.push(v); }
+    }
+    out.sort();
+    return out;
+  }
+
+  function rebuildSelects(data){
+    var lines = uniq(data.map(function(x){ return x.line; }));
+    var objs  = uniq(data.map(function(x){ return x.object; }));
+    var prms  = uniq(data.map(function(x){ return x.param; }));
+
+    function keep(sel, values){
+      var cur = sel.value;
+      var html = '<option value="">все</option>';
+      for(var i=0;i<values.length;i++){
+        var v = values[i];
+        html += '<option value="'+v+'">'+v+'</option>';
+      }
+      sel.innerHTML = html;
+      if(values.indexOf(cur) !== -1) sel.value = cur;
+    }
+    keep(fLine, lines);
+    keep(fObject, objs);
+    keep(fParam, prms);
+  }
+
+  function load(){
+    err.style.display='none'; err.textContent='';
+    meta.textContent = '…';
+
+    var params = buildServerParams();
+    fetchEvents(params).then(function(data){
+      rawData = Array.isArray(data) ? data : [];
+      rebuildSelects(rawData);
+      var filtered = applyClientFilters(rawData);
+      render(filtered);
+      meta.textContent = 'получено: ' + rawData.length;
+    }).catch(function(e){
+      meta.textContent = 'ошибка';
+      err.style.display='block';
+      err.textContent = 'Ошибка загрузки журнала: ' + (e && e.message ? e.message : e);
+      tb.innerHTML = '';
+      $('#empty').style.display = 'block';
+      shown.textContent = '0';
+      total.textContent = '0';
+    });
+  }
+
+  function reschedule(){
+    if(timer) clearInterval(timer);
+    if(!paused && everyMs>0) timer = setInterval(load, everyMs);
+  }
+
+  // Сортировка
+  $all('#tbl thead th').forEach(function(th){
+    th.addEventListener('click', function(){
+      var k = th.getAttribute('data-k');
+      if(!k) return;
+      if(sortKey === k) sortDir = -sortDir;
+      else { sortKey = k; sortDir = (k==='ts' ? -1 : 1); }
+      var filtered = applyClientFilters(rawData);
+      render(filtered);
+    });
+  });
+
+  // CSV (без replaceAll; максимально совместимо)
+  btnCsv.addEventListener('click', function(){
+    var rows = [['ts','object','param','value','code','message','line','unit_id','register_type','address','topic']];
+    var data = applyClientFilters(rawData);
+    for(var i=0;i<data.length;i++){
+      var e = data[i];
+      var v = (e.value===null||typeof e.value==="undefined") ? '' : String(e.value);
+      var row = [
+        toLocalTs(e.ts),
+        e.object||'', e.param||'',
+        v,
+        String( (typeof e.code==="undefined")? '' : e.code ),
+        e.message||'',
+        e.line||'',
+        String( (typeof e.unit_id==="undefined")? '' : e.unit_id ),
+        e.register_type||'',
+        String( (typeof e.address==="undefined")? '' : e.address ),
+        e.topic||''
+      ];
+      for(var j=0;j=row.length,j<data.length,0;){break;} // no-op, keep syntax simple
+      // escape quotes: " -> ""
+      for(var j=0;j<row.length;j++){
+        row[j] = '"' + String(row[j]).split('"').join('""') + '"';
+      }
+      rows.push(row);
+    }
+    var csv = rows.map(function(r){ return r.join(','); }).join('\r\n');
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'journal_' + Date.now() + '.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1500);
+  });
+
+  // Слушатели
+  [fQ,fLine,fObject,fParam,fStatus,fSince,fLimit].forEach(function(el){
+    el.addEventListener('input', load);
+    el.addEventListener('change', load);
+  });
+  btnRefresh.addEventListener('click', load);
+  btnPause.addEventListener('click', function(){
+    paused = !paused;
+    btnPause.textContent = paused ? 'Возобновить' : 'Пауза';
+    reschedule();
+  });
+  autoEvery.addEventListener('change', function(){
+    everyMs = parseInt(autoEvery.value,10) || 0;
+    reschedule();
+  });
+
+  // init
+  load();
+  reschedule();
+})();
 </script>
 {% endblock %}

@@ -4,43 +4,152 @@
 <head>
   <meta charset="utf-8">
   <title>{{ title or "USPD" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <nav class="topnav">
-    <a href="/current">текущие</a>
-    <a href="/journal">журнал</a>
-    <a href="/settings">настройки</a>
-    <a href="/andromeda">Андромеда</a>
-    <a href="#" id="btnChangePwd">сменить пароль</a>
-    <a href="/logout">выход</a>
+  <!-- honeypot для автозаполнения -->
+  <form aria-hidden="true" tabindex="-1" autocomplete="on"
+        style="position:absolute;left:-10000px;top:-10000px;width:1px;height:1px;overflow:hidden;opacity:0;">
+    <input type="text"     name="username"         autocomplete="username">
+    <input type="password" name="current-password" autocomplete="current-password">
+  </form>
+
+  <!-- top nav -->
+  <nav class="nav" role="navigation" aria-label="Главное меню">
+    <div class="brand">SMART FID</div>
+
+    <div class="links" id="nav-left">
+      <a href="/current"   data-path="/current">текущие</a>
+      <a href="/journal"   data-path="/journal">журнал</a>
+      <a href="/settings"  data-path="/settings">настройки</a>
+      <a href="/andromeda" data-path="/andromeda">Андромеда</a>
+    </div>
+
+    <div style="flex:1"></div>
+
+    <div class="links" id="nav-right">
+      <a href="#" id="btnChangePwd">сменить пароль</a>
+      <a href="/logout" id="btnLogout">выход</a>
+    </div>
   </nav>
 
-  <main class="container">{% block content %}{% endblock %}</main>
+  <!-- content -->
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
 
-  <!-- Change password modal -->
-  <dialog id="pwdModal">
-    <h3>Смена пароля</h3>
-    <form id="pwdForm" method="dialog">
-      <label>Старый пароль</label>
-      <input type="password" name="old_password" required autocomplete="current-password">
+  <!-- password change modal -->
+  <div class="modal-backdrop" id="pwdModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pwdTitle">
+      <header>
+        <h3 id="pwdTitle">Смена пароля</h3>
+        <button class="btn btn-ghost" id="pwdClose" aria-label="Закрыть">✕</button>
+      </header>
 
-      <label>Новый пароль</label>
-      <input type="password" name="new_password" required autocomplete="new-password"
-             onpaste="return false" oncopy="return false" ondrop="return false">
-
-      <label>Подтверждение</label>
-      <input type="password" name="confirm_password" required autocomplete="new-password"
-             onpaste="return false" oncopy="return false" ondrop="return false">
-
-      <div class="actions">
-        <button type="submit">сменить</button>
-        <button type="button" id="pwdCancel">отмена</button>
+      <div class="grid cols-1">
+        <div>
+          <label class="label">Старый пароль</label>
+          <input type="password" id="pwdOld" name="pwd_old" class="input"
+                 placeholder="Старый пароль" autocomplete="new-password"
+                 onpaste="return false" oncopy="return false" ondrop="return false">
+        </div>
+        <div>
+          <label class="label">Новый пароль</label>
+          <input type="password" id="pwdNew" name="pwd_new" class="input"
+                 placeholder="Новый пароль" autocomplete="new-password"
+                 onpaste="return false" oncopy="return false" ondrop="return false">
+        </div>
+        <div>
+          <label class="label">Подтверждение нового пароля</label>
+          <input type="password" id="pwdConfirm" name="pwd_confirm" class="input"
+                 placeholder="Подтверждение" autocomplete="new-password"
+                 onpaste="return false" oncopy="return false" ondrop="return false">
+        </div>
       </div>
-      <div id="pwdMsg"></div>
-    </form>
-  </dialog>
 
+      <div class="hr"></div>
+
+      <div class="toolbar" style="justify-content:flex-end;">
+        <button class="btn btn-ghost"   id="pwdCancel" type="button">Отмена</button>
+        <button class="btn btn-primary" id="pwdSubmit" type="button">Сменить</button>
+      </div>
+
+      <div id="pwdMsg" class="muted" style="min-height:20px;"></div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- общий скрипт -->
   <script src="/static/app.js"></script>
+
+  <!-- инлайн: навигация/модалка -->
+  <script>
+  (function(){
+    // подсветка активного пункта
+    const path = location.pathname;
+    document.querySelectorAll('.nav .links a[data-path]').forEach(a=>{
+      const p = a.getAttribute('data-path');
+      if (path === p || path.startsWith(p + '/')) a.classList.add('active');
+    });
+
+    const $ = s => document.querySelector(s);
+    const toast = $('#toast');
+    function showToast(msg){
+      toast.textContent = msg; toast.hidden = false;
+      setTimeout(()=> toast.hidden = true, 2500);
+    }
+
+    // модалка
+    const modal = $('#pwdModal');
+    const openModal  = ()=> modal.setAttribute('aria-hidden','false');
+    const closeModal = ()=>{
+      modal.setAttribute('aria-hidden','true');
+      $('#pwdOld').value = ''; $('#pwdNew').value = ''; $('#pwdConfirm').value = '';
+      $('#pwdMsg').textContent = '';
+    };
+
+    $('#btnChangePwd')?.addEventListener('click', e=>{ e.preventDefault(); openModal(); });
+    $('#pwdClose')?.addEventListener('click', closeModal);
+    $('#pwdCancel')?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', e=>{ if(e.target === modal) closeModal(); });
+    document.addEventListener('keydown', e=>{ if(e.key === 'Escape' && modal.getAttribute('aria-hidden')==='false') closeModal(); });
+
+    // смена пароля
+    $('#pwdSubmit')?.addEventListener('click', async ()=>{
+      const old_password = $('#pwdOld').value.trim();
+      const new_password = $('#pwdNew').value.trim();
+      const confirm_new_password = $('#pwdConfirm').value.trim();
+      const msg = $('#pwdMsg');
+
+      if (!old_password || !new_password || !confirm_new_password){ msg.textContent = 'Заполните все поля'; return; }
+      if (new_password !== confirm_new_password){ msg.textContent = 'Подтверждение не совпадает'; return; }
+
+      try{
+        const r = await fetch('/api/auth/change_password', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ old_password, new_password, confirm_new_password })
+        });
+        if(r.ok){ showToast('Пароль изменён'); closeModal(); }
+        else    { msg.textContent = (await r.text()) || 'Ошибка смены пароля'; }
+      }catch{ msg.textContent = 'Сеть недоступна'; }
+    });
+    function applyNavHeight(){
+      const nav = document.querySelector('.nav');
+      if(!nav) return;
+      const h = nav.offsetHeight || 56;
+      document.documentElement.style.setProperty('--nav-h', h + 'px');
+    }
+    window.addEventListener('resize', applyNavHeight, {passive:true});
+    document.addEventListener('DOMContentLoaded', applyNavHeight, {once:true});
+
+    applyNavHeight();
+  })();
+  </script>
+
+  <!-- ВАЖНО: страничный JS сюда -->
+  {% block scripts %}{% endblock %}
 </body>
 </html>
