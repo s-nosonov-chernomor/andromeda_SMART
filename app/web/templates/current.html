@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Текущие</h2>
+<table id="tblCurrent">
+  <thead><tr>
+    <th>Объект</th><th>Параметр</th><th>Значение</th><th>Код</th><th>Описание</th>
+    <th>Линия</th><th>Unit</th><th>Тип</th><th>Адрес</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<script>
+async function loadCurrent(){
+  const r = await fetch('/api/current'); const data = await r.json();
+  const tb = document.querySelector('#tblCurrent tbody'); tb.innerHTML='';
+  for(const x of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${x.object}</td>
+      <td>${x.param}</td>
+      <td>${x.value===null? '<i>null</i>': x.value}</td>
+      <td>${x.code}</td>
+      <td>${x.message||''}</td>
+      <td>${x.line}</td>
+      <td>${x.unit_id}</td>
+      <td>${x.register_type}</td>
+      <td>${x.address}</td>`;
+    tb.appendChild(tr);
+  }
+}
+loadCurrent(); setInterval(loadCurrent, 2000);
+</script>
+{% endblock %}

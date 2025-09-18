@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Журнал</h2>
+<div class="filters">
+  <input id="fObject" placeholder="object">
+  <input id="fParam" placeholder="param">
+  <input id="fLine" placeholder="line">
+  <input id="fTopic" placeholder="topic">
+  <input id="fSince" type="number" placeholder="since_s">
+  <select id="fHasValue"><option value="">value?</option><option value="1">есть</option><option value="0">null</option></select>
+  <button id="btnApply">Применить</button>
+</div>
+<table id="tblEvents">
+  <thead><tr>
+    <th data-k="ts">Время</th>
+    <th data-k="object">Объект</th>
+    <th data-k="param">Парам</th>
+    <th data-k="value">Знач</th>
+    <th data-k="code">Код</th>
+    <th data-k="message">Текст</th>
+    <th data-k="line">Линия</th>
+    <th data-k="unit_id">Unit</th>
+    <th data-k="register_type">Тип</th>
+    <th data-k="address">Адрес</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<script>
+let sortKey='ts';
+async function loadEvents(){
+  const q = new URLSearchParams();
+  const gv = id => document.getElementById(id).value.trim();
+  if(gv('fObject')) q.set('object', gv('fObject'));
+  if(gv('fParam'))  q.set('param', gv('fParam'));
+  if(gv('fLine'))   q.set('line', gv('fLine'));
+  if(gv('fTopic'))  q.set('topic', gv('fTopic'));
+  if(gv('fSince'))  q.set('since_s', gv('fSince'));
+  if(gv('fHasValue')!=='') q.set('has_value', gv('fHasValue'));
+  q.set('limit','500');
+  const r = await fetch('/api/events?'+q.toString()); const data = await r.json();
+  data.sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1));
+  const tb = document.querySelector('#tblEvents tbody'); tb.innerHTML='';
+  for(const e of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${e.ts}</td><td>${e.object}</td><td>${e.param}</td>
+      <td>${e.value===null?'<i>null</i>':e.value}</td>
+      <td>${e.code}</td><td>${e.message||''}</td>
+      <td>${e.line}</td><td>${e.unit_id}</td><td>${e.register_type}</td><td>${e.address}</td>`;
+    tb.appendChild(tr);
+  }
+}
+document.getElementById('btnApply').onclick = loadEvents;
+document.querySelectorAll('#tblEvents thead th').forEach(th=>{
+  th.onclick=()=>{sortKey=th.dataset.k||sortKey; loadEvents();};
+});
+loadEvents(); setInterval(loadEvents, 5000);
+</script>
+{% endblock %}

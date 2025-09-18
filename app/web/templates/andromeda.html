@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Андромеда — YAML{% endblock %}
+
+{# если в base.html есть блок для доп. стилей — можно подключить так:
+{% block head_extra %}
+  <link rel="stylesheet" href="/static/andromeda.css">
+{% endblock %}
+#}
+
+{% block content %}
+<div class="container">
+  <h2 style="margin:6px 0 12px;">Андромеда — YAML конфигурация</h2>
+
+  <div class="card">
+    <div class="toolbar">
+      <button class="btn btn-ghost" id="btn-read">Считать</button>
+      <button class="btn btn-primary" id="btn-save" title="Ctrl+S">Сохранить</button>
+      <label class="btn btn-ghost" for="file-open" title="Загрузить YAML из файла">
+        Загрузить из файла
+        <input id="file-open" type="file" accept=".yml,.yaml,.txt" style="display:none">
+      </label>
+      <button class="btn btn-ghost" id="btn-download">Скачать</button>
+      <span style="flex:1"></span>
+      <span id="status">
+        <span class="status-dot" id="dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px;background:#999;"></span>
+        <span id="status-text">готово</span>
+      </span>
+    </div>
+
+    <textarea id="editor" class="editor"
+              style="width:100%;height:60vh;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                     border-radius:14px;border:1px solid var(--border);padding:12px 14px;resize:vertical;"
+              spellcheck="false" placeholder="# YAML будет здесь…"></textarea>
+
+    <div class="muted" style="margin-top:8px;">
+      Подсказки: <span class="kbd">Ctrl</span> + <span class="kbd">S</span> — сохранить,
+                 <span class="kbd">Ctrl</span> + <span class="kbd">R</span> — перечитать.
+    </div>
+  </div>
+
+  <div class="footer">Андромеда: редактирование целиком файла YAML. Валидация — на сервере.</div>
+</div>
+
+<div id="toast" class="toast" style="display:none;"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const editor = document.getElementById('editor');
+  const btnRead = document.getElementById('btn-read');
+  const btnSave = document.getElementById('btn-save');
+  const btnDownload = document.getElementById('btn-download');
+  const fileOpen = document.getElementById('file-open');
+  const toast = document.getElementById('toast');
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('status-text');
+
+  let dirty = false;
+  let lastSaved = '';
+
+  function setStatus(kind, text){
+    dot.className = 'status-dot ' + (kind || '');
+    statusText.textContent = text || '';
+  }
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    setTimeout(()=> toast.style.display = 'none', 2500);
+  }
+
+  async function loadYaml(){
+    setStatus('warn', 'загрузка…');
+    const r = await fetch('/api/andromeda/config');
+    if(!r.ok){
+      setStatus('err', 'ошибка чтения');
+      showToast('Ошибка чтения: ' + await r.text());
+      return;
+    }
+    const txt = await r.text();
+    editor.value = txt;
+    lastSaved = txt;
+    dirty = false;
+    setStatus('ok', 'загружено');
+  }
+
+  async function saveYaml(){
+    setStatus('warn', 'сохранение…');
+    const raw = editor.value;
+    const r = await fetch('/api/andromeda/config', {
+      method:'PUT', headers:{'Content-Type':'text/plain'}, body: raw
+    });
+    if(!r.ok){
+      setStatus('err', 'ошибка сохранения');
+      showToast('Ошибка сохранения: ' + await r.text());
+      return;
+    }
+    const data = await r.json().catch(()=> ({}));
+    lastSaved = raw;
+    dirty = false;
+    setStatus('ok', 'сохранено' + (data.backup ? ` (backup: ${data.backup})` : ''));
+    showToast('Сохранено ✔');
+  }
+
+  function downloadYaml(){
+    const blob = new Blob([editor.value], {type:'text/yaml'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'andromeda.yaml';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  btnRead.onclick = loadYaml;
+  btnSave.onclick = saveYaml;
+  btnDownload.onclick = downloadYaml;
+
+  fileOpen.onchange = (e)=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      editor.value = reader.result;
+      dirty = true; setStatus('warn', 'изменено (локальный файл)');
+    };
+    reader.readAsText(f, 'utf-8');
+    fileOpen.value = '';
+  };
+
+  editor.addEventListener('input', ()=>{
+    if(editor.value !== lastSaved){
+      dirty = true; setStatus('warn', 'изменено');
+    }else{
+      dirty = false; setStatus('ok', 'без изменений');
+    }
+  });
+
+  window.addEventListener('beforeunload', (e)=>{
+    if(dirty){ e.preventDefault(); e.returnValue = ''; }
+  });
+
+  window.addEventListener('keydown', (e)=>{
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); saveYaml(); }
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r'){ e.preventDefault(); loadYaml(); }
+  });
+
+  // bootstrap
+  loadYaml();
+</script>
+{% endblock %}

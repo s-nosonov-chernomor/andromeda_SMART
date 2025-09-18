@@ -1,0 +1,570 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+
+{% block content %}
+<div class="container">
+  <h2 style="margin:6px 0 12px;">Настройки</h2>
+
+  <!-- ───────────────────────── Общие ───────────────────────── -->
+  <div class="card">
+    <h3>Общие</h3>
+    <div class="grid cols-2" style="margin-top:10px">
+      <!-- MQTT -->
+      <div class="card" style="padding:12px">
+        <h3>MQTT</h3>
+        <div class="grid">
+          <label class="label">Host</label>
+          <input class="input" id="mqtt_host" placeholder="127.0.0.1">
+
+          <label class="label">Port</label>
+          <input class="input" id="mqtt_port" type="number" min="1" step="1" placeholder="1883">
+
+          <label class="label">Base topic</label>
+          <input class="input" id="mqtt_base" placeholder="/devices">
+
+          <div class="grid cols-2">
+            <div>
+              <label class="label">QoS</label>
+              <input class="input" id="mqtt_qos" type="number" min="0" max="2" step="1" placeholder="0">
+            </div>
+            <div>
+              <label class="label">Retain</label>
+              <div><input id="mqtt_retain" type="checkbox"> <span class="muted">включить retain</span></div>
+            </div>
+          </div>
+
+          <label class="label">Client ID (опц.)</label>
+          <input class="input" id="mqtt_client_id" placeholder="uspd-modbus-gw">
+        </div>
+      </div>
+
+      <!-- Polling -->
+      <div class="card" style="padding:12px">
+        <h3>Опрос (polling)</h3>
+        <div class="grid cols-3">
+          <div>
+            <label class="label">interval_ms</label>
+            <input class="input" id="poll_interval" type="number" min="1" step="1">
+          </div>
+          <div>
+            <label class="label">jitter_ms</label>
+            <input class="input" id="poll_jitter" type="number" min="0" step="1">
+          </div>
+          <div>
+            <label class="label">backoff_ms</label>
+            <input class="input" id="poll_backoff" type="number" min="0" step="1">
+          </div>
+          <div>
+            <label class="label">max_errors_before_backoff</label>
+            <input class="input" id="poll_maxerr" type="number" min="0" step="1">
+          </div>
+          <div>
+            <label class="label">port_retry_backoff_s</label>
+            <input class="input" id="poll_port_retry" type="number" min="1" step="1">
+          </div>
+          <div>
+            <label class="label">batch_read.enabled</label>
+            <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
+          </div>
+          <div>
+            <label class="label">batch_read.max_bits</label>
+            <input class="input" id="batch_max_bits" type="number" min="1" step="1">
+          </div>
+          <div>
+            <label class="label">batch_read.max_registers</label>
+            <input class="input" id="batch_max_regs" type="number" min="1" step="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="card" style="padding:12px">
+        <h3>История (БД → ротация)</h3>
+        <div class="grid cols-3">
+          <div>
+            <label class="label">max_rows</label>
+            <input class="input" id="hist_rows" type="number" min="0" step="1">
+          </div>
+          <div>
+            <label class="label">ttl_days</label>
+            <input class="input" id="hist_ttl" type="number" min="0" step="1">
+          </div>
+          <div>
+            <label class="label">cleanup_every</label>
+            <input class="input" id="hist_cleanup" type="number" min="1" step="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- Debug -->
+      <div class="card" style="padding:12px">
+        <h3>DEBUG</h3>
+        <div class="grid cols-3">
+          <div>
+            <label class="label">enabled</label>
+            <div><input id="dbg_enabled" type="checkbox"> <span class="muted">подробные логи</span></div>
+          </div>
+          <div>
+            <label class="label">log_reads</label>
+            <div><input id="dbg_reads" type="checkbox"> <span class="muted">логировать каждое чтение</span></div>
+          </div>
+          <div>
+            <label class="label">summary_every_s</label>
+            <input class="input" id="dbg_summary" type="number" min="0" step="1">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn btn-primary" id="btn-save-general">Сохранить общие</button>
+      <span class="muted">Изменения MQTT/DB вступят в силу после рестарта сервиса.</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost" id="btn-read-disk">Считать</button>
+      <button class="btn btn-ghost" id="btn-save-disk">Записать</button>
+      <button class="btn btn-ghost" id="btn-reload">Перезапустить линии</button>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── Регистры ───────────────────────── -->
+  <div class="card" style="margin-top:16px">
+    <div class="toolbar">
+      <h3 style="margin:0">Линии / узлы / параметры</h3>
+      <span style="flex:1"></span>
+      <select id="filter_line" class="select" style="width:auto; min-width:200px">
+        <option value="">Все линии</option>
+      </select>
+      <input id="filter_q" class="input" style="width:260px" placeholder="поиск: объект/param/topic…">
+      <button class="btn btn-primary" id="btn-add-param">Добавить параметр</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table sticky" id="tbl-params">
+        <thead>
+          <tr>
+            <th>Линия</th>
+            <th>Unit</th>
+            <th>Объект</th>
+            <th>Параметр</th>
+            <th>Тип</th>
+            <th>Адрес</th>
+            <th>Scale</th>
+            <th>Mode</th>
+            <th>Publish</th>
+            <th>Interval, ms</th>
+            <th>Topic</th>
+            <th class="right">Действия</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-params">
+          <!-- rows via JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────────────── Модалка: Добавить/Редактировать ───────────────────── -->
+<div class="modal-backdrop" id="modal" aria-hidden="true">
+  <div class="modal">
+    <header>
+      <h3 id="modal-title">Добавить параметр</h3>
+      <button class="btn btn-ghost" onclick="closeModal()">✕</button>
+    </header>
+    <div class="grid cols-3">
+      <div>
+        <label class="label">Линия</label>
+        <select id="m_line" class="select"></select>
+      </div>
+      <div>
+        <label class="label">Unit ID</label>
+        <input id="m_unit" type="number" min="0" step="1" class="input">
+      </div>
+      <div>
+        <label class="label">Object</label>
+        <input id="m_object" class="input" placeholder="object1_io">
+      </div>
+
+      <div>
+        <label class="label">Имя параметра</label>
+        <input id="m_name" class="input" placeholder="q1">
+      </div>
+      <div>
+        <label class="label">Тип регистра</label>
+        <select id="m_rtype" class="select"></select>
+      </div>
+      <div>
+        <label class="label">Адрес</label>
+        <input id="m_addr" type="number" step="1" class="input">
+      </div>
+
+      <div>
+        <label class="label">Scale</label>
+        <input id="m_scale" type="number" step="0.001" class="input" value="1">
+      </div>
+      <div>
+        <label class="label">Mode</label>
+        <select id="m_mode" class="select"></select>
+      </div>
+      <div>
+        <label class="label">Publish mode</label>
+        <select id="m_pmode" class="select"></select>
+      </div>
+
+      <div>
+        <label class="label">publish_interval_ms</label>
+        <input id="m_pint" type="number" step="1" class="input" value="0">
+      </div>
+      <div class="grid" style="grid-column: span 2;">
+        <label class="label">Topic (опц.)</label>
+        <input id="m_topic" class="input" placeholder="/abs/or/relative/topic">
+      </div>
+    </div>
+
+    <div class="toolbar" style="margin-top:12px">
+      <button class="btn btn-primary" id="m_btn_save">Сохранить</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" style="display:none;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ───────── helpers ─────────
+  const qs = (s, r=document)=> r.querySelector(s);
+  const qsa = (s, r=document)=> [...r.querySelectorAll(s)];
+  const toast = qs('#toast');
+
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    setTimeout(()=> toast.style.display = 'none', 2500);
+  }
+  function fmt(x){ return x==null? '' : String(x); }
+
+  // ───────── enums/state ─────────
+  let ENUMS = { register_types:[], param_modes:[], publish_modes:[] };
+  let GENERAL = null;
+  let LINES = [];        // [{name, device, nodes:[{unit_id, object, params:[]}]}, ...]
+
+  // ───────── load initial ─────────
+  async function loadEnums(){
+    const r = await fetch('/api/settings/enums');
+    if(!r.ok) throw new Error(await r.text());
+    ENUMS = await r.json();
+  }
+  async function loadGeneral(){
+    const r = await fetch('/api/settings/general');
+    if(!r.ok) throw new Error(await r.text());
+    GENERAL = await r.json();
+  }
+  async function loadLines(){
+    const r = await fetch('/api/settings/lines');
+    if(!r.ok) throw new Error(await r.text());
+    LINES = await r.json();
+  }
+
+  // ───────── render: General ─────────
+  function renderGeneral(){
+    const g = GENERAL;
+    // mqtt
+    qs('#mqtt_host').value = g.mqtt.host || '';
+    qs('#mqtt_port').value = g.mqtt.port ?? 1883;
+    qs('#mqtt_base').value = g.mqtt.base_topic || '/devices';
+    qs('#mqtt_qos').value = g.mqtt.qos ?? 0;
+    qs('#mqtt_retain').checked = !!g.mqtt.retain;
+    qs('#mqtt_client_id').value = g.mqtt.client_id || '';
+
+    // polling
+    qs('#poll_interval').value = g.polling.interval_ms ?? 1000;
+    qs('#poll_jitter').value = g.polling.jitter_ms ?? 0;
+    qs('#poll_backoff').value = g.polling.backoff_ms ?? 500;
+    qs('#poll_maxerr').value = g.polling.max_errors_before_backoff ?? 5;
+    qs('#poll_port_retry').value = g.polling.port_retry_backoff_s ?? 5;
+    qs('#batch_enabled').checked = !!(g.polling.batch_read && g.polling.batch_read.enabled);
+    qs('#batch_max_bits').value = (g.polling.batch_read && g.polling.batch_read.max_bits) ?? 1968;
+    qs('#batch_max_regs').value = (g.polling.batch_read && g.polling.batch_read.max_registers) ?? 120;
+
+    // history
+    qs('#hist_rows').value = g.history.max_rows ?? 50000;
+    qs('#hist_ttl').value = g.history.ttl_days ?? 14;
+    qs('#hist_cleanup').value = g.history.cleanup_every ?? 500;
+
+    // debug
+    qs('#dbg_enabled').checked = !!g.debug.enabled;
+    qs('#dbg_reads').checked = !!g.debug.log_reads;
+    qs('#dbg_summary').value = g.debug.summary_every_s ?? 0;
+  }
+
+  async function saveGeneral(){
+    const body = {
+      mqtt: {
+        host: qs('#mqtt_host').value.trim(),
+        port: +qs('#mqtt_port').value,
+        base_topic: qs('#mqtt_base').value.trim(),
+        qos: +qs('#mqtt_qos').value,
+        retain: qs('#mqtt_retain').checked,
+        client_id: qs('#mqtt_client_id').value.trim() || null
+      },
+      polling: {
+        interval_ms: +qs('#poll_interval').value,
+        jitter_ms: +qs('#poll_jitter').value,
+        backoff_ms: +qs('#poll_backoff').value,
+        max_errors_before_backoff: +qs('#poll_maxerr').value,
+        port_retry_backoff_s: +qs('#poll_port_retry').value,
+        batch_read: {
+          enabled: qs('#batch_enabled').checked,
+          max_bits: +qs('#batch_max_bits').value,
+          max_registers: +qs('#batch_max_regs').value
+        }
+      },
+      history: {
+        max_rows: +qs('#hist_rows').value,
+        ttl_days: +qs('#hist_ttl').value,
+        cleanup_every: +qs('#hist_cleanup').value
+      },
+      debug: {
+        enabled: qs('#dbg_enabled').checked,
+        log_reads: qs('#dbg_reads').checked,
+        summary_every_s: +qs('#dbg_summary').value
+      }
+    };
+    const r = await fetch('/api/settings/general', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    if(!r.ok) throw new Error(await r.text());
+    showToast('Общие настройки сохранены');
+  }
+
+  // ───────── render: Lines/Params ─────────
+  function renderFilters(){
+    const sel = qs('#filter_line');
+    sel.innerHTML = '<option value="">Все линии</option>' +
+      LINES.map(ln=> `<option>${ln.name}</option>`).join('');
+  }
+
+  function rowHtml(lineName, unit, object, p){
+    const pm = (p.publish_mode || 'on_change');
+    return `
+      <tr data-line="${lineName}">
+        <td class="mono">${lineName}</td>
+        <td class="mono">${unit}</td>
+        <td>${object}</td>
+        <td class="mono">${p.name}</td>
+        <td class="mono">${p.register_type}</td>
+        <td class="mono">${p.address}</td>
+        <td class="mono">${p.scale ?? 1}</td>
+        <td class="mono">${p.mode}</td>
+        <td class="mono">${pm}</td>
+        <td class="mono">${p.publish_interval_ms ?? 0}</td>
+        <td class="mono">${fmt(p.topic)}</td>
+        <td class="right">
+          <button class="btn btn-ghost" onclick="openEdit('${lineName}',${unit},'${object}','${p.name.replace(/'/g, "\\'")}')">Ред.</button>
+          <button class="btn btn-danger" onclick="delParam('${lineName}',${unit},'${p.name.replace(/'/g, "\\'")}')">Удалить</button>
+        </td>
+      </tr>`;
+  }
+
+  function renderParams(){
+    const tbody = qs('#tbody-params');
+    const fl = qs('#filter_line').value;
+    const q = qs('#filter_q').value.trim().toLowerCase();
+    const rows = [];
+
+    for(const ln of LINES){
+      if(fl && ln.name !== fl) continue;
+      for(const nd of (ln.nodes || [])){
+        for(const p of (nd.params || [])){
+          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''}`.toLowerCase();
+          if(q && !hay.includes(q)) continue;
+          rows.push(rowHtml(ln.name, nd.unit_id, nd.object, p));
+        }
+      }
+    }
+    tbody.innerHTML = rows.join('') || `<tr><td colspan="12" class="center muted">нет параметров</td></tr>`;
+  }
+
+  // ───────── модалка add/edit ─────────
+  const modal = qs('#modal');
+  let MODAL_MODE = 'add'; // 'add' | 'edit'
+  let EDIT_CTX = null;    // {line, unit_id, name, object}
+
+  function openModal(mode){
+    MODAL_MODE = mode;
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  function closeModal(){
+    modal.setAttribute('aria-hidden', 'true');
+    EDIT_CTX = null;
+    // очистим поля, но не enums
+    qs('#m_object').value='';
+    qs('#m_name').value='';
+    qs('#m_addr').value='';
+    qs('#m_scale').value='1';
+    qs('#m_pint').value='0';
+    qs('#m_topic').value='';
+  }
+
+  function fillEnumsInModal(){
+    const selR = qs('#m_rtype'); selR.innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
+    const selM = qs('#m_mode'); selM.innerHTML = ENUMS.param_modes.map(x=> `<option>${x}</option>`).join('');
+    const selP = qs('#m_pmode'); selP.innerHTML = ENUMS.publish_modes.map(x=> `<option>${x}</option>`).join('');
+    const selL = qs('#m_line'); selL.innerHTML = LINES.map(x=> `<option>${x.name}</option>`).join('');
+  }
+
+  function openAdd(){
+    EDIT_CTX = null;
+    qs('#modal-title').textContent = 'Добавить параметр';
+    fillEnumsInModal();
+    // defaults
+    qs('#m_scale').value = '1';
+    qs('#m_pint').value = '0';
+    openModal('add');
+  }
+
+  function findNode(lineName, unitId){
+    const ln = LINES.find(x=> x.name === lineName);
+    if(!ln) return null;
+    return (ln.nodes || []).find(n=> +n.unit_id === +unitId) || null;
+  }
+  function findParam(lineName, unitId, name){
+    const nd = findNode(lineName, unitId);
+    if(!nd) return null;
+    return (nd.params || []).find(p=> p.name === name) || null;
+  }
+
+  function openEdit(lineName, unitId, object, name){
+    const p = findParam(lineName, unitId, name);
+    if(!p){ showToast('Параметр не найден'); return; }
+    EDIT_CTX = {line: lineName, unit_id: +unitId, name, object};
+    qs('#modal-title').textContent = `Редактировать: ${name}`;
+    fillEnumsInModal();
+    // зафиксировать текущую линию/юнит/объект (для простоты не меняем)
+    qs('#m_line').value = lineName;
+    qs('#m_line').disabled = true;
+    qs('#m_unit').value = unitId;
+    qs('#m_unit').disabled = true;
+    qs('#m_object').value = object;
+    qs('#m_object').disabled = true;
+
+    qs('#m_name').value = p.name;
+    qs('#m_rtype').value = p.register_type;
+    qs('#m_addr').value = p.address;
+    qs('#m_scale').value = p.scale ?? 1;
+    qs('#m_mode').value = p.mode;
+    qs('#m_pmode').value = p.publish_mode || 'on_change';
+    qs('#m_pint').value = p.publish_interval_ms ?? 0;
+    qs('#m_topic').value = p.topic || '';
+    openModal('edit');
+  }
+
+  async function saveModal(){
+    const payload = {
+      line: qs('#m_line').value,
+      unit_id: +qs('#m_unit').value,
+      object: qs('#m_object').value.trim(),
+      param: {
+        name: qs('#m_name').value.trim(),
+        register_type: qs('#m_rtype').value,
+        address: +qs('#m_addr').value,
+        scale: +qs('#m_scale').value || 1.0,
+        mode: qs('#m_mode').value,
+        publish_mode: qs('#m_pmode').value,
+        publish_interval_ms: +qs('#m_pint').value || 0,
+        topic: qs('#m_topic').value.trim() || null
+      }
+    };
+
+    if(MODAL_MODE === 'add'){
+      // простые валидации
+      if(!payload.line || !payload.object || !payload.param.name){ showToast('Заполните: линия, object, имя'); return; }
+      const r = await fetch('/api/settings/param/add', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      if(!r.ok) { showToast('Ошибка добавления: ' + await r.text()); return; }
+      showToast('Параметр добавлен');
+    }else{
+      // edit — line/unit/name фиксированы; передаём updates=ParamDTO
+      const body = {
+        line: EDIT_CTX.line,
+        unit_id: EDIT_CTX.unit_id,
+        name: EDIT_CTX.name,
+        updates: payload.param
+      };
+      const r = await fetch('/api/settings/param/update', {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+      });
+      if(!r.ok) { showToast('Ошибка сохранения: ' + await r.text()); return; }
+      showToast('Изменения сохранены');
+    }
+    closeModal();
+    await loadLines(); renderFilters(); renderParams();
+  }
+
+  async function delParam(lineName, unitId, name){
+    if(!confirm(`Удалить параметр ${name}?`)) return;
+    const r = await fetch('/api/settings/param/delete', {
+      method:'DELETE',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ line: lineName, unit_id: +unitId, name })
+    });
+    if(!r.ok){ showToast('Ошибка удаления: ' + await r.text()); return; }
+    showToast('Удалено');
+    await loadLines(); renderFilters(); renderParams();
+  }
+
+  // expose for inline handlers
+  window.openEdit = openEdit;
+  window.delParam = delParam;
+
+  // ───────── toolbar actions ─────────
+  qs('#btn-save-general').onclick = async ()=> { try{ await saveGeneral(); } catch(e){ showToast(String(e)); } };
+  qs('#btn-read-disk').onclick = async ()=>{
+    const r = await fetch('/api/settings/read_disk', {method:'POST'});
+    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
+    await loadGeneral(); await loadLines();
+    renderGeneral(); renderFilters(); renderParams();
+    showToast('Конфиг перечитан с диска');
+  };
+  qs('#btn-save-disk').onclick = async ()=>{
+    const r = await fetch('/api/settings/save_disk', {method:'POST'});
+    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
+    const data = await r.json().catch(()=> ({}));
+    showToast('Записано' + (data.backup? ` (backup: ${data.backup})` : ''));
+  };
+  qs('#btn-reload').onclick = async ()=>{
+    const r = await fetch('/api/settings/reload', {method:'POST'});
+    if(!r.ok){ showToast('Ошибка: ' + await r.text()); return; }
+    showToast('Линии перезапущены');
+  };
+
+  qs('#btn-add-param').onclick = ()=> {
+    qs('#m_line').disabled = false;
+    qs('#m_unit').disabled = false;
+    qs('#m_object').disabled = false;
+    openAdd();
+  };
+  qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(String(e)));
+  function closeModal(){ document.getElementById('modal').setAttribute('aria-hidden','true'); }
+
+  qs('#filter_line').onchange = renderParams;
+  qs('#filter_q').oninput = ()=> { renderParams(); };
+
+  // ───────── bootstrap ─────────
+  (async function(){
+    try{
+      await loadEnums();
+      await loadGeneral();
+      await loadLines();
+      renderGeneral();
+      renderFilters();
+      renderParams();
+    }catch(e){
+      showToast('Ошибка инициализации: ' + e);
+    }
+  })();
+</script>
+{% endblock %}

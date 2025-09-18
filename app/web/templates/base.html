@@ -1,0 +1,46 @@
+<!-- app/web/templates/base.html -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "USPD" }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/current">текущие</a>
+    <a href="/journal">журнал</a>
+    <a href="/settings">настройки</a>
+    <a href="/andromeda">Андромеда</a>
+    <a href="#" id="btnChangePwd">сменить пароль</a>
+    <a href="/logout">выход</a>
+  </nav>
+
+  <main class="container">{% block content %}{% endblock %}</main>
+
+  <!-- Change password modal -->
+  <dialog id="pwdModal">
+    <h3>Смена пароля</h3>
+    <form id="pwdForm" method="dialog">
+      <label>Старый пароль</label>
+      <input type="password" name="old_password" required autocomplete="current-password">
+
+      <label>Новый пароль</label>
+      <input type="password" name="new_password" required autocomplete="new-password"
+             onpaste="return false" oncopy="return false" ondrop="return false">
+
+      <label>Подтверждение</label>
+      <input type="password" name="confirm_password" required autocomplete="new-password"
+             onpaste="return false" oncopy="return false" ondrop="return false">
+
+      <div class="actions">
+        <button type="submit">сменить</button>
+        <button type="button" id="pwdCancel">отмена</button>
+      </div>
+      <div id="pwdMsg"></div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
