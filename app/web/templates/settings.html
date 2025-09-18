@@ -141,19 +141,23 @@
     <div class="table-wrap">
       <table class="table" id="tbl-params">
         <colgroup>
-          <col style="width:16%">  <!-- Объект -->
-          <col style="width:10%">  <!-- Параметр -->
-          <col style="width:9%">   <!-- Тип -->
-          <col style="width:9%">   <!-- Адрес -->
-          <col style="width:8%">   <!-- Scale -->
-          <col style="width:8%">   <!-- Mode -->
-          <col style="width:14%">  <!-- Publish -->
-          <col style="width:8%">   <!-- Interval -->
-          <col style="width:auto"> <!-- Topic (растягивается, перенос строк) -->
-          <col style="width:12%">  <!-- Действия -->
+          <col style="width:9%">   <!-- Линия -->
+          <col style="width:6%">   <!-- Unit -->
+          <col style="width:14%">  <!-- Объект -->
+          <col style="width:7%">   <!-- Параметр -->
+          <col style="width:6%">   <!-- Тип -->
+          <col style="width:8%">   <!-- Адрес -->
+          <col style="width:6%">   <!-- Scale -->
+          <col style="width:6%">   <!-- Mode -->
+          <col style="width:12%">  <!-- Publish -->
+          <col style="width:7%">   <!-- Interval -->
+          <col style="width:auto"> <!-- Topic -->
+          <col style="width:11%">  <!-- Действия -->
         </colgroup>
         <thead>
           <tr>
+            <th>Линия</th>
+            <th>Unit</th>
             <th>Объект</th>
             <th>Параметр</th>
             <th>Тип</th>
@@ -168,6 +172,7 @@
         </thead>
         <tbody id="tbody-params"></tbody>
       </table>
+
 
     </div>
   </div>
@@ -362,6 +367,8 @@
     const pm = (p.publish_mode || 'on_change');
     return `
       <tr data-line="${lineName}">
+        <td class="mono">${lineName}</td>
+        <td class="mono">${unit}</td>
         <td>${object}</td>
         <td class="mono">${p.name}</td>
         <td class="mono">${p.register_type}</td>
