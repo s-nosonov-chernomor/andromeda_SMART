@@ -140,10 +140,20 @@
 
     <div class="table-wrap">
       <table class="table" id="tbl-params">
+        <colgroup>
+          <col style="width:16%">  <!-- Объект -->
+          <col style="width:10%">  <!-- Параметр -->
+          <col style="width:9%">   <!-- Тип -->
+          <col style="width:9%">   <!-- Адрес -->
+          <col style="width:8%">   <!-- Scale -->
+          <col style="width:8%">   <!-- Mode -->
+          <col style="width:14%">  <!-- Publish -->
+          <col style="width:8%">   <!-- Interval -->
+          <col style="width:auto"> <!-- Topic (растягивается, перенос строк) -->
+          <col style="width:12%">  <!-- Действия -->
+        </colgroup>
         <thead>
           <tr>
-            <th>Линия</th>
-            <th>Unit</th>
             <th>Объект</th>
             <th>Параметр</th>
             <th>Тип</th>
@@ -156,10 +166,9 @@
             <th class="right">Действия</th>
           </tr>
         </thead>
-        <tbody id="tbody-params">
-          <!-- rows via JS -->
-        </tbody>
+        <tbody id="tbody-params"></tbody>
       </table>
+
     </div>
   </div>
 </div>
@@ -359,9 +368,9 @@
         <td class="mono">${p.address}</td>
         <td class="mono">${p.scale ?? 1}</td>
         <td class="mono">${p.mode}</td>
-        <td class="mono">${pm}</td>
+        <td class="wrap">${pm}</td>
         <td class="mono">${p.publish_interval_ms ?? 0}</td>
-        <td class="mono">${fmt(p.topic)}</td>
+        <td class="wrap">${fmt(p.topic)}</td>
         <td class="right">
           <button class="btn btn-ghost btn-edit"
                   data-line="${lineName}"
@@ -375,6 +384,7 @@
         </td>
       </tr>`;
   }
+
 
 
   function renderParams(){

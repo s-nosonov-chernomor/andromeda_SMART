@@ -263,3 +263,9 @@ a:hover { text-decoration: none; }
   z-index: 2;
   background: var(--surface);
 }
+/* таблицы в настройках: фиксированная раскладка + перенос long-path */
+#tbl-params { table-layout: fixed; }
+#tbl-params td.wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+
+/* чуть-чуть расширим общую "рамку" страницы, чтобы воздуха хватало */
+.container{ width: min(1280px, 100%); }  /* было 1200px — можно вернуть, если не понравится */
