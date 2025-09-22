@@ -7,7 +7,7 @@ import time
 import random
 import threading
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -42,13 +42,17 @@ class ParamCfg:
     publish_mode: str = "on_change" # "on_change"|"interval"|"on_change_and_interval"|"both"
     publish_interval_ms: int = 0
     topic: Optional[str] = None     # относительный или абсолютный топик
+    error_state: Optional[int] = None  # 0/1 или None
+    display_error_text: Optional[str] = None
+    mqttROM: Optional[str] = None
 
 @dataclass
 class NodeCfg:
     unit_id: int
     object: str
     params: List[ParamCfg]
-
+    num_object: Optional[int] = None
+    params: List[ParamCfg] = field(default_factory=list)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Вспомогательные утилиты

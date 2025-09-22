@@ -6,4 +6,4 @@
 debug:
   enabled: true
   log_reads: false
-  summary_every_s: 10
+  summary_every_s: 10767675

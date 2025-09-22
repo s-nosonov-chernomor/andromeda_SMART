@@ -26,6 +26,7 @@ import logging
 import time
 
 from app.services.modbus_line import ModbusLine
+from app.services.current_store import current_store
 
 # Глобальные объекты состояния
 _LINES: List[ModbusLine] = []
@@ -60,6 +61,7 @@ def start_lines(cfg: Dict[str, Any], mqtt_bridge) -> None:
     Полный старт линий на основе cfg и уже созданного mqtt_bridge.
     Если линии были запущены ранее — они будут остановлены и запущены заново.
     """
+    current_store.reset_from_cfg(cfg) # новое: пересобираем список «ожидаемых» параметров
     global _CURRENT_CFG, _MQTT_BRIDGE, _LINES
 
     if mqtt_bridge is None:
@@ -119,6 +121,9 @@ def hot_reload_lines(new_cfg: Dict[str, Any]) -> None:
             return
 
         _stop_all_lines_unlocked()
+        # синхронизируем список параметров «текущих» с новым YAML
+        current_store.reset_from_cfg(new_cfg)
+
 
         polling = new_cfg.get("polling", {}) or {}
         lines_conf = new_cfg.get("lines", []) or []

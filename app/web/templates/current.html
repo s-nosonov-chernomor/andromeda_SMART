@@ -41,6 +41,7 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
       <button class="btn btn-ghost" id="btnRefresh" type="button">Обновить</button>
       <button class="btn btn-primary" id="btnPause" type="button">Пауза</button>
     </div>
+    <button class="btn btn-ghost" id="btn-export-current">Экспорт XLSX</button>
   </div>
 
 
@@ -52,6 +53,7 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
           <th>Объект</th>
           <th>Параметр</th>
           <th>Значение</th>
+          <th>Время</th>
           <th>Статус</th>
           <th>Описание</th>
           <th class="right">Линия</th>
@@ -107,6 +109,16 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     const cls = isNull ? 'warn' : (codeNum === 0 ? 'ok' : 'err');
     const text = isNull ? 'нет данных' : (codeNum === 0 ? 'ok' : `err ${codeNum}`);
     return `<span class="status ${cls}">${text}</span>`;
+  }
+
+  function fmtTs(ts){
+    if(!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  function fmtSilent(s){
+    if(s == null) return '';
+    return `${s}s`;
   }
 
   function valCell(x){
@@ -204,6 +216,7 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
         <td>${safeStr(x.object)}</td>
         <td>${safeStr(x.param)}</td>
         <td>${valCell(x)}</td>
+        <td class="mono">${fmtTs(x.ts)}<br><span class="muted">${fmtSilent(x.silent_for_s)}</span></td>
         <td>${statusChip(x)}</td>
         <td>${safeStr(x.message)}</td>
         <td class="right">${safeStr(x.line)}</td>
@@ -257,6 +270,16 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     el.addEventListener('change', ()=> render(lastData));
   });
 
+  document.getElementById('btn-export-current').onclick = async ()=>{
+    const r = await fetch('/api/current/export');
+    if(!r.ok){ alert('Ошибка экспорта: '+await r.text()); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'current.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  };
   // init
 
   const searchEl = document.getElementById('fltText');

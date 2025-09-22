@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import TelemetryEvent
 from app.core.config import settings
+from app.services.current_store import current_store  # ← ДОБАВИЛИ
 import logging
 
 log = logging.getLogger("mqtt")
@@ -48,6 +49,11 @@ class MqttBridge:
             topic, payload, ctx = self.out_queue.get()
             try:
                 self.client.publish(topic, json.dumps(payload), qos=self.qos, retain=self.retain)
+
+                # обновляем «текущие» (ts — только при code==0)
+                current_store.apply_publish(ctx, payload, datetime.now(timezone.utc))
+
+                # пишем историю
                 with SessionLocal() as s:
                     evt = TelemetryEvent(
                         topic=topic,

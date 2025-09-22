@@ -2,202 +2,229 @@
 {% block title %}Настройки{% endblock %}
 
 {% block content %}
-<div class="container">
-  <h2 style="margin:6px 0 12px;">Настройки</h2>
 
-  <!-- ───────────────────────── Общие ───────────────────────── -->
-  <div class="card">
-    <h3>Общие</h3>
-    <div class="grid cols-2" style="margin-top:10px">
-      <!-- MQTT -->
-      <div class="card" style="padding:12px">
-        <h3>MQTT</h3>
-        <div class="grid">
-          <label class="label">Host</label>
-          <input class="input" id="mqtt_host" placeholder="127.0.0.1">
+<h2 style="margin:6px 0 12px;">Настройки</h2>
 
-          <label class="label">Port</label>
-          <input class="input" id="mqtt_port" type="number" min="1" step="1" placeholder="1883">
+<!-- ───────────────────────── Общие ───────────────────────── -->
+<div class="card">
+  <h3>Общие</h3>
+  <div class="grid cols-2" style="margin-top:10px">
+    <!-- MQTT -->
+    <div class="card" style="padding:12px">
+      <h3>MQTT</h3>
+      <div class="grid">
+        <label class="label">Host</label>
+        <input class="input" id="mqtt_host" placeholder="127.0.0.1">
 
-          <label class="label">Base topic</label>
-          <input class="input" id="mqtt_base" placeholder="/devices">
+        <label class="label">Port</label>
+        <input class="input" id="mqtt_port" type="number" min="1" step="1" placeholder="1883">
 
-          <div class="grid cols-2">
-            <div>
-              <label class="label">QoS</label>
-              <input class="input" id="mqtt_qos" type="number" min="0" max="2" step="1" placeholder="0">
-            </div>
-            <div>
-              <label class="label">Retain</label>
-              <div><input id="mqtt_retain" type="checkbox"> <span class="muted">включить retain</span></div>
-            </div>
-          </div>
+        <label class="label">Base topic</label>
+        <input class="input" id="mqtt_base" placeholder="/devices">
 
-          <label class="label">Client ID (опц.)</label>
-          <input class="input" id="mqtt_client_id" placeholder="uspd-modbus-gw">
-        </div>
-      </div>
-
-      <!-- Polling -->
-      <div class="card" style="padding:12px">
-        <h3>Опрос (polling)</h3>
-        <div class="grid cols-3">
+        <div class="grid cols-2">
           <div>
-            <label class="label">interval_ms</label>
-            <input class="input" id="poll_interval" type="number" min="1" step="1">
+            <label class="label" title="QoS 0/1/2">QoS</label>
+            <input class="input" id="mqtt_qos" type="number" min="0" max="2" step="1" placeholder="0">
           </div>
           <div>
-            <label class="label">jitter_ms</label>
-            <input class="input" id="poll_jitter" type="number" min="0" step="1">
-          </div>
-          <div>
-            <label class="label">backoff_ms</label>
-            <input class="input" id="poll_backoff" type="number" min="0" step="1">
-          </div>
-          <div>
-            <label class="label">max_errors_before_backoff</label>
-            <input class="input" id="poll_maxerr" type="number" min="0" step="1">
-          </div>
-          <div>
-            <label class="label">port_retry_backoff_s</label>
-            <input class="input" id="poll_port_retry" type="number" min="1" step="1">
-          </div>
-          <div>
-            <label class="label">batch_read.enabled</label>
-            <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
-          </div>
-          <div>
-            <label class="label">batch_read.max_bits</label>
-            <input class="input" id="batch_max_bits" type="number" min="1" step="1">
-          </div>
-          <div>
-            <label class="label">batch_read.max_registers</label>
-            <input class="input" id="batch_max_regs" type="number" min="1" step="1">
+            <label class="label" title="Сохранять последнее значение на брокере">Retain</label>
+            <div><input id="mqtt_retain" type="checkbox"> <span class="muted">включить retain</span></div>
           </div>
         </div>
-      </div>
 
-      <!-- History -->
-      <div class="card" style="padding:12px">
-        <h3>История (БД → ротация)</h3>
-        <div class="grid cols-3">
-          <div>
-            <label class="label">max_rows</label>
-            <input class="input" id="hist_rows" type="number" min="0" step="1">
-          </div>
-          <div>
-            <label class="label">ttl_days</label>
-            <input class="input" id="hist_ttl" type="number" min="0" step="1">
-          </div>
-          <div>
-            <label class="label">cleanup_every</label>
-            <input class="input" id="hist_cleanup" type="number" min="1" step="1">
-          </div>
+        <label class="label">Client ID (опц.)</label>
+        <input class="input" id="mqtt_client_id" placeholder="uspd-modbus-gw">
+      </div>
+    </div>
+
+    <!-- Polling -->
+    <div class="card" style="padding:12px">
+      <h3>Опрос (polling)</h3>
+      <div class="grid cols-3">
+        <div title="Период основного цикла опроса">
+          <label class="label">interval_ms</label>
+          <input class="input" id="poll_interval" type="number" min="1" step="1">
         </div>
-      </div>
-
-      <!-- Debug -->
-      <div class="card" style="padding:12px">
-        <h3>DEBUG</h3>
-        <div class="grid cols-3">
-          <div>
-            <label class="label">enabled</label>
-            <div><input id="dbg_enabled" type="checkbox"> <span class="muted">подробные логи</span></div>
-          </div>
-          <div>
-            <label class="label">log_reads</label>
-            <div><input id="dbg_reads" type="checkbox"> <span class="muted">логировать каждое чтение</span></div>
-          </div>
-          <div>
-            <label class="label">summary_every_s</label>
-            <input class="input" id="dbg_summary" type="number" min="0" step="1">
-          </div>
+        <div title="Случайная добавка к интервалу для сглаживания пиков">
+          <label class="label">jitter_ms</label>
+          <input class="input" id="poll_jitter" type="number" min="0" step="1">
+        </div>
+        <div title="Пауза бэкоффа для проблемного узла">
+          <label class="label">backoff_ms</label>
+          <input class="input" id="poll_backoff" type="number" min="0" step="1">
+        </div>
+        <div title="Сколько подряд ошибок до временного замедления узла">
+          <label class="label">max_errors_before_backoff</label>
+          <input class="input" id="poll_maxerr" type="number" min="0" step="1">
+        </div>
+        <div title="Как часто пытаться переоткрыть порт, если он упал/занят">
+          <label class="label">port_retry_backoff_s</label>
+          <input class="input" id="poll_port_retry" type="number" min="1" step="1">
+        </div>
+        <div title="Пакетное чтение последовательных регистров">
+          <label class="label">batch_read.enabled</label>
+          <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
+        </div>
+        <div title="Максимум битов (coil/discrete) в одном запросе">
+          <label class="label">batch_read.max_bits</label>
+          <input class="input" id="batch_max_bits" type="number" min="1" step="1">
+        </div>
+        <div title="Максимум регистров (holding/input) в одном запросе">
+          <label class="label">batch_read.max_registers</label>
+          <input class="input" id="batch_max_regs" type="number" min="1" step="1">
         </div>
       </div>
     </div>
 
-    <div class="toolbar">
-      <button class="btn btn-primary" id="btn-save-general">Сохранить общие</button>
-      <span class="muted">Изменения MQTT/DB вступят в силу после рестарта сервиса.</span>
-      <span style="flex:1"></span>
-      <button class="btn btn-ghost" id="btn-read-disk">Считать</button>
-      <button class="btn btn-ghost" id="btn-save-disk">Записать</button>
-      <button class="btn btn-ghost" id="btn-reload">Перезапустить линии</button>
+    <!-- History -->
+    <div class="card" style="padding:12px">
+      <h3>История (БД → ротация)</h3>
+      <div class="grid cols-3">
+        <div title="Ограничение количества строк таблицы">
+          <label class="label">max_rows</label>
+          <input class="input" id="hist_rows" type="number" min="0" step="1">
+        </div>
+        <div title="Удалять записи старше N дней (0 = не удалять)">
+          <label class="label">ttl_days</label>
+          <input class="input" id="hist_ttl" type="number" min="0" step="1">
+        </div>
+        <div title="Как часто выполнять очистку">
+          <label class="label">cleanup_every</label>
+          <input class="input" id="hist_cleanup" type="number" min="1" step="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- DB -->
+    <div class="card" style="padding:12px">
+      <h3>DB</h3>
+      <div class="grid">
+        <label class="label" title="sqlite:///./data/data.db для Windows; sqlite:////opt/... для Linux">db.url</label>
+        <input class="input" id="db_url" placeholder="sqlite:///./data/data.db">
+      </div>
+    </div>
+
+    <!-- Debug -->
+    <div class="card" style="padding:12px">
+      <h3>DEBUG</h3>
+      <div class="grid cols-3">
+        <div title="Включить подробные логи">
+          <label class="label">enabled</label>
+          <div><input id="dbg_enabled" type="checkbox"> <span class="muted">подробные логи</span></div>
+        </div>
+        <div title="Логировать каждое успешное чтение">
+          <label class="label">log_reads</label>
+          <div><input id="dbg_reads" type="checkbox"> <span class="muted">логировать чтения</span></div>
+        </div>
+        <div title="Период печати кратких сводок (0=выкл)">
+          <label class="label">summary_every_s</label>
+          <input class="input" id="dbg_summary" type="number" min="0" step="1">
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- ───────────────────────── Регистры ───────────────────────── -->
-  <div class="card" style="margin-top:16px">
-    <div class="toolbar">
-      <h3 style="margin:0">Линии / узлы / параметры</h3>
-      <span style="flex:1"></span>
-      <select id="filter_line" class="select" style="width:auto; min-width:200px">
-        <option value="">Все линии</option>
-      </select>
-      <input id="filter_q" class="input" style="width:260px" placeholder="поиск: объект/param/topic…">
-      <button class="btn btn-primary" id="btn-add-param">Добавить параметр</button>
-    </div>
-
-    <div class="table-wrap">
-      <table class="table" id="tbl-params">
-        <colgroup>
-          <col style="width:9%">   <!-- Линия -->
-          <col style="width:6%">   <!-- Unit -->
-          <col style="width:14%">  <!-- Объект -->
-          <col style="width:7%">   <!-- Параметр -->
-          <col style="width:6%">   <!-- Тип -->
-          <col style="width:8%">   <!-- Адрес -->
-          <col style="width:6%">   <!-- Scale -->
-          <col style="width:6%">   <!-- Mode -->
-          <col style="width:12%">  <!-- Publish -->
-          <col style="width:7%">   <!-- Interval -->
-          <col style="width:auto"> <!-- Topic -->
-          <col style="width:11%">  <!-- Действия -->
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Линия</th>
-            <th>Unit</th>
-            <th>Объект</th>
-            <th>Параметр</th>
-            <th>Тип</th>
-            <th>Адрес</th>
-            <th>Scale</th>
-            <th>Mode</th>
-            <th>Publish</th>
-            <th>Interval, ms</th>
-            <th>Topic</th>
-            <th class="right">Действия</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-params"></tbody>
-      </table>
-
-
-    </div>
+  <div class="toolbar">
+    <button class="btn btn-primary" id="btn-save-general">Сохранить общие</button>
+    <span class="muted">Изменения MQTT/DB вступят в силу после рестарта сервиса.</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost" id="btn-read-disk">Считать</button>
+    <button class="btn btn-ghost" id="btn-save-disk">Записать</button>
+    <button class="btn btn-ghost" id="btn-reload">Перезапустить линии</button>
   </div>
 </div>
 
-<!-- ───────────────────── Модалка: Добавить/Редактировать ───────────────────── -->
+<!-- ───────────────────────── Линии/узлы ───────────────────────── -->
+<div class="card" style="margin-top:16px">
+  <div class="toolbar">
+    <h3 style="margin:0">Линии / узлы</h3>
+    <span style="flex:1"></span>
+    <button class="btn btn-primary" id="btn-add-line">Добавить линию</button>
+  </div>
+  <div id="lines-wrap"></div>
+</div>
+
+<!-- ───────────────────────── Регистры ───────────────────────── -->
+<div class="card" style="margin-top:16px">
+  <div class="toolbar">
+    <h3 style="margin:0">Параметры (регистры)</h3>
+    <span style="flex:1"></span>
+    <select id="filter_line" class="select" style="width:auto; min-width:200px">
+      <option value="">Все линии</option>
+    </select>
+    <input id="filter_q" class="input" style="width:260px" placeholder="поиск: объект/param/topic…">
+    <button class="btn btn-primary" id="btn-add-param">Добавить параметр</button>
+  </div>
+  <div class="toolbar">
+    <button class="btn btn-ghost" id="btn-export-xlsx">Экспорт XLSX</button>
+    <label class="btn btn-primary" for="file-import-xlsx" style="cursor:pointer;">Импорт XLSX</label>
+    <input type="file" id="file-import-xlsx" accept=".xlsx" style="display:none">
+  </div>
+
+  <div class="table-wrap">
+    <table class="table" id="tbl-params">
+      <colgroup>
+        <col style="width:8%"><!-- Линия -->
+        <col style="width:6%"><!-- Unit -->
+        <col style="width:14%"><!-- Объект -->
+        <col style="width:8%"><!-- Параметр -->
+        <col style="width:6%"><!-- Тип -->
+        <col style="width:7%"><!-- Адрес -->
+        <col style="width:6%"><!-- Scale -->
+        <col style="width:6%"><!-- Mode -->
+        <col style="width:10%"><!-- Publish -->
+        <col style="width:7%"><!-- Interval -->
+        <col style="width:11%"><!-- Topic -->
+        <col style="width:5%"><!-- Err state -->
+        <col style="width:13%"><!-- Err text -->
+        <col style="width:8%"><!-- mqttROM -->
+        <col style="width:10%"><!-- Действия -->
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Линия</th>
+          <th>Unit</th>
+          <th>Объект</th>
+          <th>Параметр</th>
+          <th>Тип</th>
+          <th>Адрес</th>
+          <th>Scale</th>
+          <th>Mode</th>
+          <th>Publish</th>
+          <th>Interval, ms</th>
+          <th>Topic</th>
+          <th title="0 или 1">Err</th>
+          <th>Err text</th>
+          <th>mqttROM</th>
+          <th class="right">Действия</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-params"></tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- ───────────────────── Модалка: Добавить/Редактировать параметр ───────────────────── -->
 <div class="modal-backdrop" id="modal" aria-hidden="true">
   <div class="modal">
     <header>
       <h3 id="modal-title">Добавить параметр</h3>
       <button class="btn btn-ghost" onclick="closeModal()">✕</button>
     </header>
+
     <div class="grid cols-3">
+      <!-- при добавлении берём из существующих -->
       <div>
         <label class="label">Линия</label>
-        <select id="m_line" class="select"></select>
+        <select id="m_line2" class="select"></select>
       </div>
       <div>
-        <label class="label">Unit ID</label>
-        <input id="m_unit" type="number" min="0" step="1" class="input">
+        <label class="label">Узел (Unit/Object)</label>
+        <select id="m_node" class="select"></select>
       </div>
-      <div>
-        <label class="label">Object</label>
-        <input id="m_object" class="input" placeholder="object1_io">
-      </div>
+      <div></div>
 
       <div>
         <label class="label">Имя параметра</label>
@@ -233,6 +260,25 @@
         <label class="label">Topic (опц.)</label>
         <input id="m_topic" class="input" placeholder="/abs/or/relative/topic">
       </div>
+
+      <div>
+        <label class="label" title="0/1 — состояние для аварии">error_state</label>
+        <select id="m_err" class="select">
+          <option value="">—</option>
+          <option value="0">0</option>
+          <option value="1">1</option>
+        </select>
+      </div>
+      <div class="grid" style="grid-column: span 2;">
+        <label class="label">display_error_text</label>
+        <input id="m_errtxt" class="input" placeholder="Например: Авария клапана">
+      </div>
+
+      <div>
+        <label class="label">mqttROM</label>
+        <input id="m_mqttrom" class="input" placeholder="Имя для ПО «РОМ»">
+      </div>
+      <div></div><div></div>
     </div>
 
     <div class="toolbar" style="margin-top:12px">
@@ -251,14 +297,11 @@
   const qs = (s, r=document)=> r.querySelector(s);
   const qsa = (s, r=document)=> [...r.querySelectorAll(s)];
   const toast = qs('#toast');
+  const elLinesWrap = qs('#lines-wrap');
 
-  function showToast(msg){
-    console.warn(msg);
-    toast.textContent = msg;
-    toast.style.display = 'block';
-    setTimeout(()=> toast.style.display = 'none', 2500);
-  }
-  function fmt(x){ return x==null? '' : String(x); }
+  function showToast(msg){ toast.textContent = msg; toast.style.display = 'block'; setTimeout(()=> toast.style.display = 'none', 2500); }
+  const fmt = x => x==null? '' : String(x);
+  const escHtml = s => String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 
   async function apiJson(url, opts={}){
     const r = await fetch(url, opts);
@@ -266,7 +309,6 @@
       const t = await r.text().catch(()=> '');
       throw new Error(`${r.status} ${r.statusText}${t?': '+t:''}`);
     }
-    // Пусть /api/settings/save_disk может вернуть {ok:true, backup:...}
     const ct = r.headers.get('content-type')||'';
     return ct.includes('application/json') ? r.json() : r.text();
   }
@@ -274,7 +316,7 @@
   // ───────── enums/state ─────────
   let ENUMS = { register_types:[], param_modes:[], publish_modes:[] };
   let GENERAL = null;
-  let LINES = [];        // [{name, device, nodes:[{unit_id, object, params:[]}]}, ...]
+  let LINES = [];        // [{name, device, baudrate, timeout, parity, stopbits, port_retry_backoff_s, nodes:[{unit_id, object, num_object, params:[]}]}, ...]
 
   // ───────── load initial ─────────
   async function loadEnums(){ ENUMS = await apiJson('/api/settings/enums'); }
@@ -299,13 +341,20 @@
     qs('#poll_maxerr').value = g.polling.max_errors_before_backoff ?? 5;
     qs('#poll_port_retry').value = g.polling.port_retry_backoff_s ?? 5;
     qs('#batch_enabled').checked = !!(g.polling.batch_read && g.polling.batch_read.enabled);
-    qs('#batch_max_bits').value = (g.polling.batch_read && g.polling.batch_read.max_bits) ?? 1968;
-    qs('#batch_max_regs').value = (g.polling.batch_read && g.polling.batch_read.max_registers) ?? 120;
+    qs('#batch_max_bits').value = (g.polling.batch_read && g.polling.batch_read.max_bits) ?? 64;
+    qs('#batch_max_regs').value = (g.polling.batch_read && g.polling.batch_read.max_registers) ?? 60;
 
     // history
     qs('#hist_rows').value = g.history.max_rows ?? 50000;
     qs('#hist_ttl').value = g.history.ttl_days ?? 14;
     qs('#hist_cleanup').value = g.history.cleanup_every ?? 500;
+
+    // db
+    if (g.db && g.db.url !== undefined) {
+      qs('#db_url').value = g.db.url || '';
+    } else {
+      qs('#db_url').value = '';
+    }
 
     // debug
     qs('#dbg_enabled').checked = !!g.debug.enabled;
@@ -340,6 +389,9 @@
         ttl_days: +qs('#hist_ttl').value,
         cleanup_every: +qs('#hist_cleanup').value
       },
+      db: {
+        url: qs('#db_url').value.trim()
+      },
       debug: {
         enabled: qs('#dbg_enabled').checked,
         log_reads: qs('#dbg_reads').checked,
@@ -352,47 +404,224 @@
     showToast('Общие настройки сохранены');
   }
 
-  // ───────── render: Lines/Params ─────────
+  // ───────── render: Lines/Nodes ─────────
+  function renderLines(){
+    elLinesWrap.innerHTML = '';
+    for (const ln of LINES) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.line = ln.name;
+
+      card.innerHTML = `
+        <div class="grid cols-3">
+          <div>
+            <label class="label">Имя линии</label>
+            <input class="input" value="${escHtml(ln.name)}" disabled>
+          </div>
+          <div>
+            <label class="label">Порт</label>
+            <input class="input input-device" placeholder="COM4 / /dev/ttyUSB0" value="${escHtml(ln.device || '')}">
+          </div>
+          <div>
+            <label class="label">Скорость (baudrate)</label>
+            <input class="input input-baud" type="number" min="1200" step="100" value="${escHtml(ln.baudrate ?? 9600)}">
+          </div>
+          <div>
+            <label class="label">Parity</label>
+            <select class="select input-parity">
+              ${['N','E','O'].map(p=> `<option ${ln.parity===p?'selected':''}>${p}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="label">Stop bits</label>
+            <input class="input input-stopbits" type="number" min="1" step="1" value="${escHtml(ln.stopbits ?? 1)}">
+          </div>
+          <div>
+            <label class="label">Timeout, s</label>
+            <input class="input input-timeout" type="number" step="0.01" value="${escHtml(ln.timeout ?? 0.1)}">
+          </div>
+          <div>
+            <label class="label">port_retry_backoff_s</label>
+            <input class="input input-prb" type="number" min="1" step="1" value="${escHtml(ln.port_retry_backoff_s ?? 5)}">
+          </div>
+        </div>
+
+        <div class="toolbar" style="margin-top:10px">
+          <button class="btn btn-primary btn-save-line">Сохранить линию</button>
+          <button class="btn btn-danger btn-del-line">Удалить линию</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost btn-add-node">Добавить узел</button>
+        </div>
+
+        <div class="table-wrap" style="margin-top:10px">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:12%">Unit ID</th>
+                <th style="width:38%">Object</th>
+                <th style="width:20%">№ объекта</th>
+                <th class="right" style="width:30%">Действия</th>
+              </tr>
+            </thead>
+            <tbody class="tbody-nodes">
+              ${(ln.nodes||[]).map(nd => `
+                <tr data-unit="${nd.unit_id}">
+                  <td><input class="input nd-unit" type="number" min="0" step="1" value="${escHtml(nd.unit_id)}"></td>
+                  <td><input class="input nd-object" value="${escHtml(nd.object||'')}"></td>
+                  <td><input class="input nd-num" type="number" min="0" step="1" value="${escHtml(nd.num_object ?? '')}"></td>
+                  <td class="right">
+                    <button class="btn btn-primary btn-save-node">Сохранить</button>
+                    <button class="btn btn-danger btn-del-node">Удалить</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      elLinesWrap.appendChild(card);
+    }
+  }
+
+  // ── Линии: события
+  elLinesWrap.addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button'); if(!btn) return;
+    const card = e.target.closest('.card'); if(!card) return;
+    const line = card.dataset.line;
+
+    if (btn.classList.contains('btn-save-line')) {
+      try{
+        const body = {
+          name: line,
+          device: card.querySelector('.input-device').value.trim(),
+          baudrate: +card.querySelector('.input-baud').value,
+          parity: card.querySelector('.input-parity').value,
+          stopbits: +card.querySelector('.input-stopbits').value,
+          timeout: +card.querySelector('.input-timeout').value,
+          port_retry_backoff_s: +card.querySelector('.input-prb').value,
+        };
+        await apiJson('/api/settings/line/update', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        showToast('Линия сохранена');
+      }catch(e){ showToast(e.message); }
+    }
+
+    if (btn.classList.contains('btn-del-line')) {
+      if(!confirm(`Удалить линию ${line}?`)) return;
+      try{
+        await apiJson('/api/settings/line/delete', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: line})});
+        await loadLines(); renderLines(); renderFilters(); renderParams();
+        showToast('Линия удалена');
+      }catch(e){ showToast(e.message); }
+    }
+
+    if (btn.classList.contains('btn-add-node')) {
+      const tb = card.querySelector('.tbody-nodes');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input class="input nd-unit" type="number" min="0" step="1" value=""></td>
+        <td><input class="input nd-object" value=""></td>
+        <td><input class="input nd-num" type="number" min="0" step="1" value=""></td>
+        <td class="right">
+          <button class="btn btn-primary btn-save-node">Сохранить</button>
+          <button class="btn btn-ghost btn-cancel-node">Отмена</button>
+        </td>
+      `;
+      tb.appendChild(tr);
+    }
+
+    if (btn.classList.contains('btn-save-node')) {
+      const tr = btn.closest('tr');
+      const old_unit = tr.getAttribute('data-unit');
+      const unit_id = +tr.querySelector('.nd-unit').value;
+      const object  = tr.querySelector('.nd-object').value.trim();
+      const num     = tr.querySelector('.nd-num').value.trim()===''? null : +tr.querySelector('.nd-num').value;
+      if(!object || isNaN(unit_id)) { showToast('Заполните Unit и Object'); return; }
+
+      try{
+        if (old_unit==='' || old_unit===null) {
+          await apiJson('/api/settings/node/add', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ line, node: { unit_id, object, num_object: num } })
+          });
+          showToast('Узел добавлен');
+        } else {
+          await apiJson('/api/settings/node/update', {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ line, old_unit_id: +old_unit, updates: { unit_id, object, num_object: num } })
+          });
+          showToast('Узел сохранён');
+        }
+        await loadLines(); renderLines(); renderFilters(); renderParams();
+      }catch(e){ showToast(e.message); }
+    }
+
+    if (btn.classList.contains('btn-del-node')) {
+      const tr = btn.closest('tr');
+      const unit_id = +tr.getAttribute('data-unit');
+      if(!confirm(`Удалить узел Unit=${unit_id}?`)) return;
+      try{
+        await apiJson('/api/settings/node/delete', {
+          method:'DELETE', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ line, unit_id })
+        });
+        await loadLines(); renderLines(); renderFilters(); renderParams();
+        showToast('Узел удалён');
+      }catch(e){ showToast(e.message); }
+    }
+
+    if (btn.classList.contains('btn-cancel-node')) {
+      btn.closest('tr').remove();
+    }
+  });
+
+  qs('#btn-add-line').onclick = async ()=>{
+    const name = prompt('Имя новой линии (например: line2):','line2');
+    if(!name) return;
+    try{
+      await apiJson('/api/settings/line/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+      await loadLines(); renderLines(); renderFilters(); renderParams();
+      showToast('Линия добавлена');
+    }catch(e){ showToast(e.message); }
+  };
+
+  // ───────── render: Params table ─────────
   function renderFilters(){
     const sel = qs('#filter_line');
     sel.innerHTML = '<option value="">Все линии</option>' +
-      LINES.map(ln=> `<option>${ln.name}</option>`).join('');
-  }
-
-  function escHtml(s){
-    return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+      LINES.map(ln=> `<option>${escHtml(ln.name)}</option>`).join('');
   }
 
   function rowHtml(lineName, unit, object, p){
     const pm = (p.publish_mode || 'on_change');
     return `
-      <tr data-line="${lineName}">
-        <td class="mono">${lineName}</td>
-        <td class="mono">${unit}</td>
-        <td>${object}</td>
-        <td class="mono">${p.name}</td>
-        <td class="mono">${p.register_type}</td>
-        <td class="mono">${p.address}</td>
-        <td class="mono">${p.scale ?? 1}</td>
-        <td class="mono">${p.mode}</td>
-        <td class="wrap">${pm}</td>
-        <td class="mono">${p.publish_interval_ms ?? 0}</td>
-        <td class="wrap">${fmt(p.topic)}</td>
+      <tr data-line="${escHtml(lineName)}">
+        <td class="mono">${escHtml(lineName)}</td>
+        <td class="mono">${escHtml(unit)}</td>
+        <td>${escHtml(object)}</td>
+        <td class="mono">${escHtml(p.name)}</td>
+        <td class="mono">${escHtml(p.register_type)}</td>
+        <td class="mono">${escHtml(p.address)}</td>
+        <td class="mono">${escHtml(p.scale ?? 1)}</td>
+        <td class="mono">${escHtml(p.mode)}</td>
+        <td class="wrap">${escHtml(pm)}</td>
+        <td class="mono">${escHtml(p.publish_interval_ms ?? 0)}</td>
+        <td class="wrap">${escHtml(fmt(p.topic))}</td>
+        <td class="mono">${p.error_state==null? '' : escHtml(p.error_state)}</td>
+        <td class="wrap">${escHtml(fmt(p.display_error_text))}</td>
+        <td class="mono">${escHtml(fmt(p.mqttROM))}</td>
         <td class="right">
           <button class="btn btn-ghost btn-edit"
-                  data-line="${lineName}"
-                  data-unit="${unit}"
-                  data-object="${object}"
-                  data-name="${p.name}">Ред.</button>
+                  data-line="${escHtml(lineName)}"
+                  data-unit="${escHtml(unit)}"
+                  data-object="${escHtml(object)}"
+                  data-name="${escHtml(p.name)}">Ред.</button>
           <button class="btn btn-danger btn-del"
-                  data-line="${lineName}"
-                  data-unit="${unit}"
-                  data-name="${p.name}">Удалить</button>
+                  data-line="${escHtml(lineName)}"
+                  data-unit="${escHtml(unit)}"
+                  data-name="${escHtml(p.name)}">Удалить</button>
         </td>
       </tr>`;
   }
-
-
 
   function renderParams(){
     const tbody = qs('#tbody-params');
@@ -404,19 +633,19 @@
       if(fl && ln.name !== fl) continue;
       for(const nd of (ln.nodes || [])){
         for(const p of (nd.params || [])){
-          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''}`.toLowerCase();
+          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''} ${p.display_error_text||''} ${p.mqttROM||''}`.toLowerCase();
           if(q && !hay.includes(q)) continue;
           rows.push(rowHtml(ln.name, nd.unit_id, nd.object, p));
         }
       }
     }
-    tbody.innerHTML = rows.join('') || `<tr><td colspan="12" class="center muted">нет параметров</td></tr>`;
+    tbody.innerHTML = rows.join('') || `<tr><td colspan="15" class="center muted">нет параметров</td></tr>`;
   }
 
   // ───────── модалка add/edit ─────────
   const modal = qs('#modal');
-  let MODAL_MODE = 'add'; // 'add' | 'edit'
-  let EDIT_CTX = null;    // {line, unit_id, name, object}
+  let MODAL_MODE = 'add';
+  let EDIT_CTX = null;
 
   function openModal(mode){
     MODAL_MODE = mode;
@@ -425,31 +654,42 @@
   function closeModal(){
     modal.setAttribute('aria-hidden', 'true');
     EDIT_CTX = null;
-    qs('#m_line').disabled = false;
-    qs('#m_unit').disabled = false;
-    qs('#m_object').disabled = false;
-    // очистка полей
-    qs('#m_object').value='';
+    // очистка
     qs('#m_name').value='';
     qs('#m_addr').value='';
     qs('#m_scale').value='1';
     qs('#m_pint').value='0';
     qs('#m_topic').value='';
+    qs('#m_err').value='';
+    qs('#m_errtxt').value='';
+    qs('#m_mqttrom').value='';
   }
 
-
   function fillEnumsInModal(){
-    const selR = qs('#m_rtype'); selR.innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
-    const selM = qs('#m_mode'); selM.innerHTML = ENUMS.param_modes.map(x=> `<option>${x}</option>`).join('');
-    const selP = qs('#m_pmode'); selP.innerHTML = ENUMS.publish_modes.map(x=> `<option>${x}</option>`).join('');
-    const selL = qs('#m_line'); selL.innerHTML = LINES.map(x=> `<option>${x.name}</option>`).join('');
+    qs('#m_rtype').innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
+    qs('#m_mode').innerHTML  = ENUMS.param_modes.map(x=> `<option>${x}</option>`).join('');
+    qs('#m_pmode').innerHTML = ENUMS.publish_modes.map(x=> `<option>${x}</option>`).join('');
+    // линии
+    qs('#m_line2').innerHTML = LINES.map(x=> `<option>${escHtml(x.name)}</option>`).join('');
+    // узлы по текущей линии
+    fillNodesBySelectedLine();
+  }
+
+  function fillNodesBySelectedLine(){
+    const lineName = qs('#m_line2').value;
+    const line = LINES.find(x=> x.name === lineName);
+    const sel = qs('#m_node');
+    if(!line){ sel.innerHTML = ''; return; }
+    sel.innerHTML = (line.nodes||[]).map(nd => {
+      const label = `${nd.unit_id} — ${nd.object}${nd.num_object!=null? ' (№'+nd.num_object+')':''}`;
+      return `<option data-unit="${nd.unit_id}" data-object="${escHtml(nd.object||'')}" data-num="${nd.num_object ?? ''}">${escHtml(label)}</option>`;
+    }).join('');
   }
 
   function openAdd(){
     EDIT_CTX = null;
     qs('#modal-title').textContent = 'Добавить параметр';
     fillEnumsInModal();
-    // defaults
     qs('#m_scale').value = '1';
     qs('#m_pint').value = '0';
     openModal('add');
@@ -470,67 +710,83 @@
     const p = findParam(lineName, unitId, name);
     if(!p){ showToast('Параметр не найден'); return; }
     EDIT_CTX = {line: lineName, unit_id: +unitId, name, object};
+
     qs('#modal-title').textContent = `Редактировать: ${name}`;
     fillEnumsInModal();
-    // зафиксировать текущую линию/юнит/объект (для простоты не меняем)
-    qs('#m_line').value = lineName;
-    qs('#m_line').disabled = true;
-    qs('#m_unit').value = unitId;
-    qs('#m_unit').disabled = true;
-    qs('#m_object').value = object;
-    qs('#m_object').disabled = true;
 
+    // зафиксировать линию/узел
+    qs('#m_line2').value = lineName;
+    fillNodesBySelectedLine();
+    // выбрать нужный узел
+    const sel = qs('#m_node');
+    [...sel.options].forEach(o => {
+      if(+o.dataset.unit === +unitId && o.dataset.object === object) sel.value = o.value;
+    });
+    // поля параметра
     qs('#m_name').value = p.name;
     qs('#m_rtype').value = p.register_type;
-    qs('#m_addr').value = p.address;
+    qs('#m_addr').value  = p.address;
     qs('#m_scale').value = p.scale ?? 1;
-    qs('#m_mode').value = p.mode;
+    qs('#m_mode').value  = p.mode;
     qs('#m_pmode').value = p.publish_mode || 'on_change';
-    qs('#m_pint').value = p.publish_interval_ms ?? 0;
+    qs('#m_pint').value  = p.publish_interval_ms ?? 0;
     qs('#m_topic').value = p.topic || '';
+    qs('#m_err').value   = (p.error_state==null? '' : String(p.error_state));
+    qs('#m_errtxt').value = p.display_error_text || '';
+    qs('#m_mqttrom').value = p.mqttROM || '';
     openModal('edit');
   }
 
   async function saveModal(){
-    const payload = {
-      line: qs('#m_line').value,
-      unit_id: +qs('#m_unit').value,
-      object: qs('#m_object').value.trim(),
-      param: {
-        name: qs('#m_name').value.trim(),
-        register_type: qs('#m_rtype').value,
-        address: +qs('#m_addr').value,
-        scale: +qs('#m_scale').value || 1.0,
-        mode: qs('#m_mode').value,
-        publish_mode: qs('#m_pmode').value,
-        publish_interval_ms: +qs('#m_pint').value || 0,
-        topic: qs('#m_topic').value.trim() || null
-      }
+    // читаем выбранный узел
+    const line = qs('#m_line2').value;
+    const nodeOpt = qs('#m_node').selectedOptions[0];
+    if(!nodeOpt){ showToast('Выберите узел'); return; }
+    const unit_id = +nodeOpt.dataset.unit;
+    const object  = nodeOpt.dataset.object;
+
+    const param = {
+      name: qs('#m_name').value.trim(),
+      register_type: qs('#m_rtype').value,
+      address: +qs('#m_addr').value,
+      scale: +qs('#m_scale').value || 1.0,
+      mode: qs('#m_mode').value,
+      publish_mode: qs('#m_pmode').value,
+      publish_interval_ms: +qs('#m_pint').value || 0,
+      topic: qs('#m_topic').value.trim() || null,
+      error_state: (qs('#m_err').value===''? null : +qs('#m_err').value),
+      display_error_text: qs('#m_errtxt').value.trim() || null,
+      mqttROM: qs('#m_mqttrom').value.trim() || null
     };
 
     if(MODAL_MODE === 'add'){
-      if(!payload.line || !payload.object || !payload.param.name){
-        showToast('Заполните: линия, object, имя'); return;
-      }
+      if(!line || !object || !param.name){ showToast('Заполните: линия, узел, имя'); return; }
       await apiJson('/api/settings/param/add', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ line, unit_id, object, param })
       });
       showToast('Параметр добавлен');
-    }else{
-      const body = {
-        line: EDIT_CTX.line,
-        unit_id: EDIT_CTX.unit_id,
-        name: EDIT_CTX.name,
-        updates: payload.param
-      };
+    } else {
+      // редактирование — ключом остаются line/unit/name
       await apiJson('/api/settings/param/update', {
-        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ line: EDIT_CTX.line, unit_id: EDIT_CTX.unit_id, name: EDIT_CTX.name, updates: param })
       });
       showToast('Изменения сохранены');
     }
     closeModal();
     await loadLines(); renderFilters(); renderParams();
   }
+
+  // делегирование кликов по параметрам
+  qs('#tbody-params').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if(!btn) return;
+    if(btn.classList.contains('btn-edit')){
+      openEdit(btn.dataset.line, +btn.dataset.unit, btn.dataset.object, btn.dataset.name);
+    } else if(btn.classList.contains('btn-del')){
+      delParam(btn.dataset.line, +btn.dataset.unit, btn.dataset.name);
+    }
+  });
 
   async function delParam(lineName, unitId, name){
     if(!confirm(`Удалить параметр ${name}?`)) return;
@@ -543,18 +799,13 @@
     await loadLines(); renderFilters(); renderParams();
   }
 
-  // expose for inline handlers
-  // window.openEdit = openEdit;
-  // window.delParam = delParam;
-  window.closeModal = closeModal;
-
-  // ───────── toolbar actions ─────────
+  // ───────── toolbar: общие действия ─────────
   qs('#btn-save-general').onclick = ()=> saveGeneral().catch(e=> showToast(e.message));
   qs('#btn-read-disk').onclick = async ()=>{
     try{
       await apiJson('/api/settings/read_disk', {method:'POST'});
       await loadGeneral(); await loadLines();
-      renderGeneral(); renderFilters(); renderParams();
+      renderGeneral(); renderLines(); renderFilters(); renderParams();
       showToast('Конфиг перечитан с диска');
     }catch(e){ showToast(e.message); }
   };
@@ -571,32 +822,43 @@
     }catch(e){ showToast(e.message); }
   };
 
-  qs('#btn-add-param').onclick = ()=> { openAdd(); };
+  qs('#btn-add-param').onclick = ()=> openAdd();
   qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(e.message));
+  qs('#m_line2').onchange = fillNodesBySelectedLine;
 
   qs('#filter_line').onchange = renderParams;
   qs('#filter_q').oninput = ()=> { renderParams(); };
 
-  // Делегирование кликов по кнопкам в таблице
-  qs('#tbody-params').addEventListener('click', (e)=>{
-    const btn = e.target.closest('button');
-    if(!btn) return;
+  // ─── Экспорт / Импорт XLSX
+  qs('#btn-export-xlsx').onclick = async ()=>{
+    try{
+      const r = await fetch('/api/settings/params/export');
+      if(!r.ok){ showToast('Ошибка экспорта: '+await r.text()); return; }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'params.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(a.href);
+    }catch(e){ showToast('Ошибка сети'); }
+  };
 
-    if(btn.classList.contains('btn-edit')){
-      openEdit(
-        btn.dataset.line,
-        +btn.dataset.unit,
-        btn.dataset.object,
-        btn.dataset.name
-      );
-    } else if(btn.classList.contains('btn-del')){
-      delParam(
-        btn.dataset.line,
-        +btn.dataset.unit,
-        btn.dataset.name
-      );
+  qs('#file-import-xlsx').onchange = async (ev)=>{
+    const f = ev.target.files[0];
+    if(!f) return;
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    try{
+      const r = await fetch('/api/settings/params/import', { method:'POST', body: fd });
+      if(!r.ok){ showToast('Ошибка импорта: '+await r.text()); return; }
+      const info = await r.json().catch(()=> ({}));
+      showToast('Импортировано: '+(info.imported_params ?? '?'));
+      await loadLines(); renderFilters(); renderParams();
+    }catch(e){ showToast('Ошибка сети'); }
+    finally{
+      ev.target.value = '';
     }
-  });
+  };
 
   // ───────── bootstrap ─────────
   (async function(){
@@ -605,6 +867,7 @@
       await loadGeneral();
       await loadLines();
       renderGeneral();
+      renderLines();
       renderFilters();
       renderParams();
     }catch(e){

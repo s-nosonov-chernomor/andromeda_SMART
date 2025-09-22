@@ -65,7 +65,7 @@ a:hover { text-decoration: none; }
 .nav .links a:hover{ background: var(--surface-2); color: var(--text); }
 
 /* ───────────────── layout ───────────────── */
-.container{ width: min(1200px, 100%); margin: 0 auto; padding: 18px 22px; }
+.container{ width: min(1600px, 100%); margin: 0 auto; padding: 18px 22px; }
 .toolbar{ display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin: 8px 0 16px; }
 
 /* ───────────────── buttons ───────────────── */
@@ -268,4 +268,4 @@ a:hover { text-decoration: none; }
 #tbl-params td.wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 
 /* чуть-чуть расширим общую "рамку" страницы, чтобы воздуха хватало */
-.container{ width: min(1280px, 100%); }  /* было 1200px — можно вернуть, если не понравится */
+/*.container{ width: min(2580px, 100%); }  !* было 1200px — можно вернуть, если не понравится *!*/
