@@ -6,6 +6,8 @@
   <title>{{ title or "USPD" }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="/static/favicon.ico">
+
 </head>
 <body>
   <!-- honeypot для автозаполнения -->
@@ -17,7 +19,7 @@
 
   <!-- top nav -->
   <nav class="nav" role="navigation" aria-label="Главное меню">
-    <div class="brand">SMART FID</div>
+    <div class="brand">SMART PERSAY</div>
 
     <div class="links" id="nav-left">
       <a href="/current"   data-path="/current">текущие</a>
@@ -32,6 +34,11 @@
       <a href="#" id="btnChangePwd">сменить пароль</a>
       <a href="/logout" id="btnLogout">выход</a>
     </div>
+    <!-- Доп. слот под кнопки страницы -->
+    <div class="links" id="nav-actions">
+      {% block nav_actions %}{% endblock %}
+    </div>
+
   </nav>
 
   <!-- content -->

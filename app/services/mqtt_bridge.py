@@ -27,8 +27,13 @@ class MqttBridge:
         self.out_queue = queue.Queue()
 
     def connect(self):
-        self.client.connect(self.conf["host"], int(self.conf["port"]))
-        threading.Thread(target=self.client.loop_forever, daemon=True).start()
+        # не валим процесс, если брокер недоступен
+        try:
+            # асинхронное подключение + автоповтор внутри paho
+            self.client.connect_async(self.conf["host"], int(self.conf["port"]))
+        except Exception as e:
+            log.error(f"[mqtt] initial connect failed: {e}")
+        self.client.loop_start()  # неблокирующий цикл
         threading.Thread(target=self._publisher_loop, daemon=True).start()
 
     def publish(self, topic_like: str, value, code: int = 0, status_details: Optional[dict] = None, context: Optional[dict] = None):

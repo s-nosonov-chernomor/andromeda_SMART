@@ -1,0 +1,51 @@
+agent:
+  logger:
+    write_in_logfile: false # true - писать в лог-файл, false - не писать
+    level_log: 1            #1-INFO, 2-WARNING, 3-DEBUG, 4-ERROR
+    path_log: ./log/agent_iot.log
+    max_size_log: 2         # Максимальный размер лог-файла в МБ
+    max_backups_log: 30     # Максимальное количество резервных копий лог-файла
+    max_age_log: 10         # Максимальное количество дней хранения лог-файла
+
+  buffer:
+    enabled: true         # true - использовать буфер, false - не использовать
+    total_topic: 5000     # Максимальное количество топиков в буфере 1000-1_000_000
+    batch_size: 100       # Размер пакета отправляемых сообщений 100-2000
+    time_send_batch: 500  # Время отправки пакета в миллисекундах, 10-5000
+
+  mqtt:
+    controllerid: IDVAR  #  Controller ID заменить на свой
+    global_pub_time: 600 # По умолчанию, раз в 600с
+    publish_topic_pattern: "/andromeda/Controller/{controllerId}/In/" # Шаблон топиков для сообщений контроллер->андромеда
+    subscribe_topic_pattern: "/andromeda/Controller/{controllerId}/Out/#" # Шаблон топиков для сообщений контроллер<-андромеда
+    aperture_percent: 2
+    aperture_threshold: 0.1
+
+  global_broker:
+      host: "ssl://1в7.0.0.1:1884"  # Адрес брокера заменить на свой
+      client_id: "agent_iot_global" # Сlient_id = Controller ID заменить на свой
+      keepalive: 60                 # Интервал heartbeat в секундах
+      clean_session: false          # true - для нового клиента, false - для сохранения сессии
+      autoreconnect: true           # true - для автоматического переподключения
+      retry_interval: 5             # Интервал между попытками переподключения в секундах
+      max_retries: 100              # Максимальное количество попыток переподключения
+      tls:
+        ca_cert: configs/agent/ca.crt # Путь к файлу сертификата CA
+
+  local_broker: 
+      host: "unix:///var/run/mosquitto/mosquitto.sock" # или localhost/ssl
+      client_id: "agent_iot_local"
+      keepalive: 120        # Интервал heartbeat в секундах
+      clean_session: true   # true - для нового клиента, false - для сохранения сессии
+      autoreconnect: true   # true - для автоматического переподключения
+      retry_interval: 5     # Интервал между попытками переподключения в секундах
+      max_retries: 100      # Максимальное количество попыток переподключения
+      wildcard:             # Список паттернов wildcard топиков
+        enabled: true
+        patterns:
+          - "/devices/+/controls/+"
+      topic_filters:        # пользовательские правила фильтрации по топику
+        enabled: true
+        ends_with:          # топики заканчивающиеся на
+            - "/on"         # топики заканчивающиеся на /on Управление
+

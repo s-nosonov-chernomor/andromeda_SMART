@@ -12,6 +12,8 @@ from openpyxl import Workbook, load_workbook
 
 from app.core.config import settings
 from app.services.hot_reload import start_lines, stop_lines, hot_reload_lines
+from app.core.validate_cfg import validate_cfg
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # helpers
@@ -24,7 +26,17 @@ def _cfg() -> Dict[str, Any]:
     return copy.deepcopy(cfg)
 
 def _write_cfg(cfg: Dict[str, Any]) -> str:
-    return settings.save_yaml_config(cfg)  # возвращает имя backup-файла или ''
+    """Сохранить YAML через settings + вернуть имя backup-файла (или '')."""
+    try:
+        validate_cfg(cfg)  # ← проверяем ПЕРЕД записью
+    except ValueError as e:
+        # отдаём 400 в читаемом виде
+        from fastapi import HTTPException
+        raise HTTPException(400, f"Некорректный конфиг: {e}")
+
+    backup_name = settings.save_yaml_config(cfg)
+    return backup_name
+
 
 def _find_line(cfg: Dict[str, Any], line_name: str) -> Optional[Dict[str, Any]]:
     for ln in cfg.get("lines", []) or []:
@@ -202,8 +214,8 @@ def add_line(payload: Dict[str, Any]):
 
 @router.put("/line/update")
 def update_line(body: Dict[str, Any]):
+    body = body or {}
     name = body.get("name")
-    updates = body.get("updates") or {}
     if not name:
         raise HTTPException(400, "Missing line name")
 
@@ -213,20 +225,54 @@ def update_line(body: Dict[str, Any]):
     if not line:
         raise HTTPException(404, "Line not found")
 
-    # допустимые поля
-    for k in ("device", "baudrate", "parity", "stopbits", "timeout", "port_retry_backoff_s"):
-        if k in updates:
-            line[k] = updates[k]
+    # поддерживаем оба формата: {name, updates:{...}} ИЛИ {name, device,...}
+    updates = body.get("updates") or {
+        k: body[k] for k in (
+            "device", "baudrate", "parity", "stopbits",
+            "timeout", "port_retry_backoff_s", "rs485_rts_toggle"
+        ) if k in body
+    }
+
+    for k, v in updates.items():
+        if k in ("device","baudrate","parity","stopbits","timeout","port_retry_backoff_s","rs485_rts_toggle"):
+            line[k] = v
+
+    backup = _write_cfg(cfg)
+    return {"ok": True, "backup": backup}
+
+@router.delete("/line/delete")
+def delete_line(body: Dict[str, Any]):
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Missing line name")
+
+    cfg = _cfg()
+    lines: List[Dict[str, Any]] = cfg.get("lines", [])
+    idx = next((i for i, ln in enumerate(lines) if ln.get("name") == name), -1)
+    if idx < 0:
+        raise HTTPException(404, "Line not found")
+
+    # удаляем линию целиком (вместе с nodes/params)
+    lines.pop(idx)
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}
 
 @router.post("/node/add")
 def add_node(body: Dict[str, Any]):
-    line_name = body.get("line")
-    unit_id   = body.get("unit_id")
-    object_   = (body.get("object") or "").strip()
-    num_obj   = body.get("num_object", None)
+    body = body or {}
+    node_block = body.get("node")
+    if isinstance(node_block, dict):
+        line_name = body.get("line")
+        unit_id   = node_block.get("unit_id")
+        object_   = (node_block.get("object") or "").strip()
+        num_obj   = node_block.get("num_object", None)
+    else:
+        line_name = body.get("line")
+        unit_id   = body.get("unit_id")
+        object_   = (body.get("object") or "").strip()
+        num_obj   = body.get("num_object", None)
+
 
     if not line_name or unit_id is None or not object_:
         raise HTTPException(400, "Bad payload")
@@ -245,6 +291,48 @@ def add_node(body: Dict[str, Any]):
     if num_obj is not None:
         node["num_object"] = int(num_obj)
     nodes.append(node)
+
+    backup = _write_cfg(cfg)
+    return {"ok": True, "backup": backup}
+
+@router.put("/node/update")
+def update_node(body: Dict[str, Any]):
+    """
+    body = {
+      "line": "line1",
+      "old_unit_id": 1,
+      "updates": {"unit_id": 2, "object": "new_obj", "num_object": 5}
+    }
+    """
+    body = body or {}
+    line_name = body.get("line")
+    old_unit_id = body.get("old_unit_id")
+    updates = body.get("updates") or {}
+    if not line_name or old_unit_id is None:
+        raise HTTPException(400, "Bad payload (need line, old_unit_id)")
+
+    cfg = _cfg()
+    lines: List[Dict[str, Any]] = cfg.get("lines", [])
+    line = next((ln for ln in lines if ln.get("name") == line_name), None)
+    if not line:
+        raise HTTPException(404, "Line not found")
+
+    nodes: List[Dict[str, Any]] = line.setdefault("nodes", [])
+    node = next((nd for nd in nodes if int(nd.get("unit_id", -1)) == int(old_unit_id)), None)
+    if not node:
+        raise HTTPException(404, "Node not found")
+
+    if "unit_id" in updates:
+        new_uid = int(updates["unit_id"])
+        if new_uid != int(old_unit_id) and any(int(nd.get("unit_id", -1)) == new_uid for nd in nodes):
+            raise HTTPException(409, "Another node with this unit_id already exists")
+        node["unit_id"] = new_uid
+
+    if "object" in updates:
+        node["object"] = updates["object"]
+
+    if "num_object" in updates:
+        node["num_object"] = updates["num_object"]
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}
@@ -558,173 +646,3 @@ def save_disk():
 def reload_lines():
     hot_reload_lines(settings.get_cfg())
     return {"ok": True}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# XLSX экспорт/импорт параметров
-# ─────────────────────────────────────────────────────────────────────────────
-
-# колонки XLSX
-X_HDR = [
-    "Line", "Unit", "Object", "ObjNum",
-    "Name", "RegisterType", "Address", "Scale",
-    "Mode", "PublishMode", "PublishIntervalMs", "Topic",
-    "ErrorState", "ErrorText", "mqttROM",
-]
-
-@router.get("/params/export")
-def export_params_xlsx():
-    try:
-        from openpyxl import Workbook
-    except Exception as e:
-        raise HTTPException(500, f"openpyxl required: {e}")
-
-    cfg = _cfg()
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "params"
-    ws.append(X_HDR)
-
-    for ln in cfg.get("lines", []) or []:
-        line_name = ln.get("name", "")
-        for nd in ln.get("nodes", []) or []:
-            unit = nd.get("unit_id")
-            obj = nd.get("object", "")
-            objnum = nd.get("num_object", None)
-            for p in nd.get("params", []) or []:
-                ws.append([
-                    line_name, unit, obj, objnum,
-                    p.get("name", ""), p.get("register_type", ""), p.get("address", ""),
-                    p.get("scale", 1.0), p.get("mode", "r"),
-                    p.get("publish_mode", "on_change"), p.get("publish_interval_ms", 0),
-                    p.get("topic", ""),
-                    p.get("error_state", None),
-                    p.get("display_error_text", ""),
-                    p.get("mqttROM", "")
-                ])
-
-    bio = BytesIO()
-    wb.save(bio); bio.seek(0)
-    return StreamingResponse(
-        bio,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="params.xlsx"'}
-    )
-
-@router.post("/params/import")
-def import_params_xlsx(file: UploadFile = File(...)):
-    try:
-        from openpyxl import load_workbook
-    except Exception as e:
-        raise HTTPException(500, f"openpyxl required: {e}")
-
-    data = file.file.read()
-    try:
-        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
-    except Exception as e:
-        raise HTTPException(400, f"bad xlsx: {e}")
-
-    ws = wb.active
-    hdr = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))[0:len(X_HDR)]]
-    # допускаем, что порядок/регистр колонок может различаться — построим индекс
-    idx = {name: hdr.index(name) for name in X_HDR if name in hdr}
-    missing = [h for h in ["Line", "Unit", "Object", "Name", "RegisterType", "Address"] if h not in idx]
-    if missing:
-        raise HTTPException(400, f"missing columns: {', '.join(missing)}")
-
-    cfg = _cfg()
-    imported = 0
-
-    for row in ws.iter_rows(min_row=2):
-        get = lambda key, default=None: row[idx[key]].value if key in idx else default
-
-        line_name = str(get("Line", "") or "").strip()
-        if not line_name:
-            continue
-        unit = int(get("Unit", 0) or 0)
-        obj = str(get("Object", "") or "").strip()
-        objnum = get("ObjNum", None)
-        try:
-            objnum = int(objnum) if objnum is not None else None
-        except:  # noqa
-            objnum = None
-
-        name = str(get("Name", "") or "").strip()
-        rtype = str(get("RegisterType", "") or "").strip()
-        address = get("Address", None)
-        address = int(address) if address is not None else None
-        if not (name and rtype and address is not None):
-            continue
-
-        scale = get("Scale", 1.0) or 1.0
-        try:
-            scale = float(scale)
-        except:  # noqa
-            scale = 1.0
-
-        mode = str(get("Mode", "r") or "r")
-        pmode = str(get("PublishMode", "on_change") or "on_change")
-        pint = get("PublishIntervalMs", 0) or 0
-        try:
-            pint = int(pint)
-        except:  # noqa
-            pint = 0
-        topic = str(get("Topic", "") or "").strip()
-
-        error_state = get("ErrorState", None)
-        display_error_text = str(get("ErrorText", "") or "").strip()
-        mqttROM = str(get("mqttROM", "") or "").strip()
-
-        # — бережно обновляем структуру
-        line = _find_line(cfg, line_name)
-        if not line:
-            line = {
-                "name": line_name,
-                "device": "",
-                "baudrate": 9600,
-                "timeout": 0.1,
-                "parity": "N",
-                "stopbits": 1,
-                "port_retry_backoff_s": 5,
-                "rs485_rts_toggle": False,
-                "nodes": []
-            }
-            cfg.setdefault("lines", []).append(line)
-
-        node = _find_node(line, unit)
-        if not node:
-            node = {"unit_id": unit, "object": obj, "num_object": objnum or 1, "params": []}
-            line.setdefault("nodes", []).append(node)
-        else:
-            if obj:
-                node["object"] = obj
-            if objnum is not None:
-                node["num_object"] = objnum
-
-        existing = None
-        for p in node.get("params", []):
-            if p.get("name") == name:
-                existing = p
-                break
-
-        upd = {
-            "name": name,
-            "register_type": rtype,
-            "address": address,
-            "scale": scale,
-            "mode": mode,
-            "publish_mode": pmode,
-            "publish_interval_ms": pint,
-            "topic": topic or None,
-            "error_state": error_state,
-            "display_error_text": display_error_text or None,
-            "mqttROM": mqttROM or None,
-        }
-
-        if existing:
-            existing.update({k: v for k, v in upd.items() if v is not None})
-        else:
-            node["params"].append(upd)
-        imported += 1
-
-    backup = _write_cfg(cfg)
-    return {"ok": True, "imported_params": imported, "backup": backup}

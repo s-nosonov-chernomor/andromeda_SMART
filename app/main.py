@@ -33,6 +33,8 @@ from app.services.hot_reload import start_lines, stop_lines
 # БД (создать таблицы, в т.ч. telemetry_events)
 from app.db.session import init_db
 
+from app.api.routes.service import router as service_router
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Пути к статике/шаблонам
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ app.include_router(settings_router, tags=["settings"])
 app.include_router(mock_router, tags=["mock"])
 app.include_router(andromeda_router, tags=["andromeda"])
 
+app.include_router(service_router, tags=["service"])
 # ─────────────────────────────────────────────────────────────────────────────
 # Совместимость со «старыми» путями
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +150,12 @@ def _startup():
     # 4) поднимаем MQTT и Modbus-линии
     global mqtt_bridge
     mqtt_bridge = MqttBridge(settings.mqtt)
-    mqtt_bridge.connect()
+
+    try:
+        mqtt_bridge.connect()
+    except Exception as e:
+        logging.getLogger("web").error("mqtt connect error (non-fatal): %s", e)
+
     start_lines(settings.get_cfg(), mqtt_bridge)
 
     app.state.mqtt_bridge = mqtt_bridge

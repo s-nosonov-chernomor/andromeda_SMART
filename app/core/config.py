@@ -9,7 +9,8 @@ from typing import Any, Dict
 import yaml
 from pydantic import Field, PrivateAttr
 from pydantic_settings import BaseSettings
-
+import time
+from app.core.validate_cfg import validate_cfg
 
 class Settings(BaseSettings):
     # секрет для cookie-сессий
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
     _cfg: Dict[str, Any] = PrivateAttr(default_factory=dict)
     _config_path: Path | None = PrivateAttr(default=None)
     _accounts_path: Path | None = PrivateAttr(default=None)
+
+    # куда и сколько бэкапов хранить (можно переопределить в YAML через секцию backups)
+    backups_dir: str = "./data/backups"
+    backups_keep: int = 10
+
 
     # ───────── пути ─────────
     @property
@@ -68,26 +74,52 @@ class Settings(BaseSettings):
         if p.exists():
             with open(p, "r", encoding="utf-8") as f:
                 self._cfg = yaml.safe_load(f) or {}
+                validate_cfg(self._cfg)  # выбросит ValueError, если что-то не так
         else:
             self._cfg = {}
 
-    def save_yaml_config(self, data: Dict[str, Any]) -> str:
-        """Сохраняет YAML и делает .bak; возвращает имя бэкапа или ''."""
-        self._cfg = data or {}
-        p = self.config_path
-        p.parent.mkdir(parents=True, exist_ok=True)
+    def save_yaml_config(self, new_cfg: dict) -> str:
+        """
+        Сохраняет YAML на диск, предварительно кладёт бэкап текущего файла
+        в backups_dir и делает ротацию (оставляем последние N).
+        Возвращает только имя файла бэкапа (без пути) либо '' если бэкапа не было.
+        """
+        cfg_path = Path(self.cfg_path).resolve()
+
+        # настройки бэкапов — берём из new_cfg.backups или из дефолтов Settings
+        bsec = (new_cfg or {}).get("backups", {})
+        backups_dir = Path(bsec.get("dir", self.backups_dir)).resolve()
+        backups_keep = int(bsec.get("keep", self.backups_keep) or 0)
+
+        backups_dir.mkdir(parents=True, exist_ok=True)
 
         backup_name = ""
-        if p.exists():
-            ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-            backup = p.with_suffix(p.suffix + f".{ts}.bak")
-            shutil.copy2(p, backup)
-            backup_name = backup.name
+        if cfg_path.exists():
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            # пример: config-20250918-153012.yaml.bak
+            backup_name = f"{cfg_path.stem}-{ts}{cfg_path.suffix}.bak"
+            shutil.copy2(cfg_path, backups_dir / backup_name)
 
-        with open(p, "w", encoding="utf-8") as f:
-            yaml.safe_dump(self._cfg, f, allow_unicode=True, sort_keys=False)
+            # ротация: оставляем последние backups_keep
+            if backups_keep > 0:
+                patt = f"{cfg_path.stem}-*{cfg_path.suffix}.bak"
+                files = sorted(backups_dir.glob(patt))
+                extra = len(files) - backups_keep
+                if extra > 0:
+                    for old in files[:extra]:
+                        try:
+                            old.unlink()
+                        except Exception:
+                            pass
 
+        # записываем новый YAML
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(new_cfg, f, allow_unicode=True, sort_keys=False)
+
+        # обновляем кеш настроек
+        self._cfg = new_cfg
         return backup_name
+
 
     # ───────── удобные секции ─────────
     @property

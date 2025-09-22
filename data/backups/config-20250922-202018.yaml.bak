@@ -1,0 +1,73 @@
+debug:
+  enabled: true
+  log_reads: false
+  summary_every_s: 20
+mqtt:
+  host: 127.0.0.1
+  port: 1883
+  base_topic: /devices
+  qos: 0
+  retain: false
+  client_id: uspd-modbus-gw
+db:
+  url: sqlite:///./data/data.db
+polling:
+  interval_ms: 2000
+  jitter_ms: 120
+  backoff_ms: 500
+  max_errors_before_backoff: 5
+  port_retry_backoff_s: 5
+  batch_read:
+    enabled: true
+    max_bits: 64
+    max_registers: 60
+lines:
+- name: line1
+  device: COM4
+  baudrate: 115200
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 0
+  nodes:
+  - unit_id: 44
+    object: object1_io
+    params:
+    - name: q1
+      register_type: coil
+      address: 1001
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 5000
+      topic: site1/room2/io/q1
+      error_state: 0
+      display_error_text: Что-то не так работает как надо
+      mqttROM: Chnl1
+    - name: q8
+      register_type: coil
+      address: 1002
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 5000
+      topic: site1/room2/io/q3
+      error_state: 1
+      display_error_text: Снова где то кто то что-то не так сделал походу
+      mqttROM: Chnl4
+    num_object: 1
+- name: line2
+  device: ''
+  baudrate: 9600
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 5
+  nodes: []
+history:
+  max_rows: 50000
+  ttl_days: 15
+  cleanup_every: 500
+backups:
+  dir: ./data/backups
+  keep: 10

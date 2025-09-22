@@ -12,7 +12,7 @@ mqtt:
 db:
   url: sqlite:///./data/data.db
 polling:
-  interval_ms: 1000
+  interval_ms: 2000
   jitter_ms: 120
   backoff_ms: 500
   max_errors_before_backoff: 5
@@ -23,7 +23,7 @@ polling:
     max_registers: 60
 lines:
 - name: line1
-  device: COM4
+  device: COM41
   baudrate: 115200
   timeout: 0.1
   parity: N
@@ -31,7 +31,7 @@ lines:
   port_retry_backoff_s: 0
   nodes:
   - unit_id: 44
-    object: object1_io
+    object: object1_io2
     params:
     - name: q1
       register_type: coil
@@ -44,7 +44,7 @@ lines:
       error_state: 0
       display_error_text: Что-то не так работает как надо
       mqttROM: Chnl1
-    - name: q7
+    - name: q8
       register_type: coil
       address: 1002
       scale: 1
@@ -58,5 +58,8 @@ lines:
     num_object: 1
 history:
   max_rows: 50000
-  ttl_days: 14
+  ttl_days: 15
   cleanup_every: 500
+backups:
+  dir: ./data/backups
+  keep: 10

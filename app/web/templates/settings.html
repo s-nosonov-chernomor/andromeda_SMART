@@ -1,9 +1,14 @@
 {% extends "base.html" %}
+{% block nav_actions %}
+<button class="btn btn-ghost" id="btn-read-disk">Считать</button>
+<button class="btn btn-ghost" id="btn-save-disk">Записать</button>
+<button class="btn btn-ghost" id="btn-reload">Перезапустить линии</button>
+<button class="btn btn-danger" id="btn-restart-service">Перезапуск сервиса</button>
+{% endblock %}
+
 {% block title %}Настройки{% endblock %}
 
 {% block content %}
-
-<h2 style="margin:6px 0 12px;">Настройки</h2>
 
 <!-- ───────────────────────── Общие ───────────────────────── -->
 <div class="card">
@@ -127,11 +132,7 @@
 
   <div class="toolbar">
     <button class="btn btn-primary" id="btn-save-general">Сохранить общие</button>
-    <span class="muted">Изменения MQTT/DB вступят в силу после рестарта сервиса.</span>
-    <span style="flex:1"></span>
-    <button class="btn btn-ghost" id="btn-read-disk">Считать</button>
-    <button class="btn btn-ghost" id="btn-save-disk">Записать</button>
-    <button class="btn btn-ghost" id="btn-reload">Перезапустить линии</button>
+    <span class="muted">Изменения MQTT/DB вступят в силу после перезапуска сервиса.</span>
   </div>
 </div>
 
@@ -821,6 +822,17 @@
       showToast('Линии перезапущены');
     }catch(e){ showToast(e.message); }
   };
+  // перезапуск сервиса
+  qs('#btn-restart-service').onclick = async ()=>{
+    if(!confirm('Перезапустить сервис сейчас?')) return;
+    try{
+      await apiJson('/api/service/restart', { method: 'POST' });
+      showToast('Сервис перезапускается…');
+    }catch(e){
+      showToast(e.message);
+    }
+  };
+
 
   qs('#btn-add-param').onclick = ()=> openAdd();
   qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(e.message));
