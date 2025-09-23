@@ -7,6 +7,10 @@
 {% endblock %}
 #}
 
+{% block nav_actions %}
+<button class="btn btn-danger" id="btn-andromeda-restart">Перезагрузка Агента</button>
+{% endblock %}
+
 {% block content %}
 <div class="container">
   <h2 style="margin:6px 0 12px;">Андромеда — YAML конфигурация</h2>
@@ -146,5 +150,19 @@
 
   // bootstrap
   loadYaml();
+  document.getElementById('btn-andromeda-restart')?.addEventListener('click', async ()=>{
+    if(!confirm('Перезагрузить сервис агентa Андромеды сейчас?')) return;
+    try{
+      const r = await fetch('/api/andromeda/restart', { method:'POST' });
+      if(!r.ok){
+        const t = await r.text().catch(()=> '');
+        alert('Ошибка: ' + (t || r.status + ' ' + r.statusText));
+        return;
+      }
+      alert('Агент перезапускается…');
+    }catch(e){
+      alert('Сеть недоступна');
+    }
+  });
 </script>
 {% endblock %}

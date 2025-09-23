@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from datetime import datetime
 import os, yaml, shutil, time
 from pathlib import Path
+import subprocess, platform
 
 
 from app.core.config import settings  # ← добавили
@@ -142,3 +143,24 @@ async def put_cfg(request: Request):
 def ui_andromeda(request: Request):
     # Меню уже есть в base.html — просто рендерим контент страницы
     return templates.TemplateResponse("andromeda.html", {"request": request})
+
+@router.post("/api/andromeda/restart")
+def restart_andromeda_agent():
+    """
+    Перезапускает systemd-сервис агентa Андромеды.
+    Требует Linux и права на systemctl (либо sudoers/polkit).
+    """
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=501, detail="Перезапуск доступен только в Linux (systemd)")
+
+    cmd = ["systemctl", "restart", "agent.service"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if res.returncode != 0:
+            err = (res.stderr or res.stdout or "").strip()
+            raise HTTPException(status_code=500, detail=f"systemctl exit {res.returncode}: {err}")
+        return {"ok": True}
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="systemctl timeout")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"restart failed: {e}")
