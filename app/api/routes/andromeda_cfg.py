@@ -159,12 +159,22 @@ def restart_service():
     custom = sec.get("restart_cmd")
 
     # 1) кастомная команда из YAML
+    # 1) кастомная команда из YAML
     if custom:
-        try:
-            subprocess.run(custom, shell=True, check=True)
-            return {"ok": True, "via": "restart_cmd", "cmd": custom}
-        except Exception as e:
-            raise HTTPException(500, f"restart_cmd failed: {e}")
+        # Нормализуем окружение: часто systemctl/pkill и т.п. не находятся
+        env = dict(os.environ)
+        env["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin"
+
+        # Если custom — это одна строка с командами/пайпами, запускаем через bash -lc,
+        # чтобы не упасть на bash-измых и чтобы подхватился PATH из env выше.
+        r = subprocess.run(
+            ["/bin/bash", "-lc", custom],
+            check=False, text=True, capture_output=True, env=env
+        )
+        if r.returncode != 0:
+            detail = (r.stderr or r.stdout or "").strip()
+            raise HTTPException(500, f"restart_cmd failed (rc={r.returncode}): {detail}")
+        return {"ok": True, "via": "restart_cmd", "cmd": custom, "stdout": (r.stdout or '').strip()}
 
     # 2) systemctl (systemd)
     if shutil.which("systemctl"):
