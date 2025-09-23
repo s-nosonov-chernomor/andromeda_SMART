@@ -162,11 +162,12 @@ def get_general():
         "polling": cfg.get("polling", {}),
         "history": cfg.get("history", {}),
         "debug": cfg.get("debug", {}),
+        "serial": cfg.get("serial", {}),
     }
 
 @router.put("/general")
 def put_general(body: Dict[str, Any]):
-    for k in ("mqtt", "db", "polling", "history", "debug"):
+    for k in ("mqtt", "db", "polling", "history", "debug", "serial"):
         if k not in body:
             raise HTTPException(400, f"Missing section in body: {k}")
 
@@ -176,6 +177,7 @@ def put_general(body: Dict[str, Any]):
     cfg["polling"] = body["polling"]
     cfg["history"] = body["history"]
     cfg["debug"] = body["debug"]
+    cfg["serial"] = body["serial"] or {"echo": False}
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}

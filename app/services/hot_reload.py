@@ -69,6 +69,8 @@ def start_lines(cfg: Dict[str, Any], mqtt_bridge) -> None:
 
     polling = cfg.get("polling", {}) or {}
     lines_conf = cfg.get("lines", []) or []
+    serial_echo = bool(cfg.get("serial", {}).get("echo", False))
+
 
     with _LINES_LOCK:
         # Остановить то, что было
@@ -79,7 +81,7 @@ def start_lines(cfg: Dict[str, Any], mqtt_bridge) -> None:
         started = 0
         for lc in lines_conf:
             try:
-                line = ModbusLine(lc, mqtt_bridge, polling)
+                line = ModbusLine(lc, mqtt_bridge, polling, serial_echo=serial_echo)
                 line.start()
                 _LINES.append(line)
                 started += 1
@@ -127,11 +129,12 @@ def hot_reload_lines(new_cfg: Dict[str, Any]) -> None:
 
         polling = new_cfg.get("polling", {}) or {}
         lines_conf = new_cfg.get("lines", []) or []
+        serial_echo = bool(new_cfg.get("serial", {}).get("echo", False))
 
         started = 0
         for lc in lines_conf:
             try:
-                line = ModbusLine(lc, _MQTT_BRIDGE, polling)
+                line = ModbusLine(lc, _MQTT_BRIDGE, polling, serial_echo=serial_echo)
                 line.start()
                 _LINES.append(line)
                 started += 1

@@ -50,7 +50,6 @@ class ParamCfg:
 class NodeCfg:
     unit_id: int
     object: str
-    params: List[ParamCfg]
     num_object: Optional[int] = None
     params: List[ParamCfg] = field(default_factory=list)
 
@@ -91,7 +90,7 @@ class ModbusLine(threading.Thread):
       • Сводки по линии (debug.summary_every_s), нормализация адресов в debug.mode.
     """
 
-    def __init__(self, line_conf: dict, mqtt_bridge, poll_conf: dict):
+    def __init__(self, line_conf: dict, mqtt_bridge, poll_conf: dict, serial_echo: bool = False):
         """
         :param line_conf: секция одной линии из YAML
         :param mqtt_bridge: инстанс MqttBridge
@@ -108,6 +107,7 @@ class ModbusLine(threading.Thread):
         self.parity = str(line_conf.get("parity", "N")).upper()
         self.stopbits = int(line_conf.get("stopbits", 1))
         self.rs485_toggle = bool(line_conf.get("rs485_rts_toggle", False))
+        self.serial_echo = bool(serial_echo)
 
         # Переоткрытие порта / бэкофф
         self._port_fault = False
@@ -305,6 +305,20 @@ class ModbusLine(threading.Thread):
             }.get(self.parity, serial.PARITY_NONE)
             inst.serial.stopbits = self.stopbits
             inst.clear_buffers_before_each_transaction = True
+
+            if self.serial_echo:
+                try:
+                    # minimalmodbus сам вычитает отправленные байты из RX
+                    inst.handle_local_echo = True
+                except Exception:
+                    pass
+                try:
+                    # на всякий случай очистим мусор
+                    inst.serial.reset_input_buffer()
+                    inst.serial.reset_output_buffer()
+                except Exception:
+                    pass
+
 
             if self.rs485_toggle and RS485Settings is not None:
                 try:
@@ -542,6 +556,12 @@ class ModbusLine(threading.Thread):
                 # Batch-read (если включено)
                 if self.batch_enabled:
                     blocks = self._group_sequential(nd.params)
+                    if self.serial_echo:
+                        try:
+                            inst.serial.reset_input_buffer()
+                        except Exception:
+                            pass
+
                     for rtype, start, count, group_params in blocks:
                         try:
                             if rtype == "coil":
@@ -585,6 +605,11 @@ class ModbusLine(threading.Thread):
                     continue  # следующий узел
 
                 # Одиночные чтения (если batch выключен)
+                if self.serial_echo:
+                    try:
+                        inst.serial.reset_input_buffer()
+                    except Exception:
+                        pass
                 for p in nd.params:
                     key = self._make_key(nd.unit_id, p.name)
                     val, code, msg = self._read_single(inst, p)

@@ -1,7 +1,7 @@
 # app/services/mqtt_bridge.py
 import json, queue, threading
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 import paho.mqtt.client as mqtt
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -20,7 +20,23 @@ class MqttBridge:
             client_id=conf.get("client_id", ""),
             protocol=mqtt.MQTTv311,
         )
-        self.client.on_connect = lambda c,u,f,rc,p=None: log.info(f"[mqtt] connected rc={rc}")
+
+        self._handlers: Dict[str, Callable[[str], bool]] = {}  # topic -> handler(value_str)->bool
+        self._lock = threading.RLock()
+
+        def _on_connect(c, u, flags, rc, properties=None):
+            log.info(f"[mqtt] connected rc={rc}")
+            # после реконнекта — заново подпишемся на все темы команд
+            with self._lock:
+                for t in self._handlers.keys():
+                    try:
+                        self.client.subscribe(t, qos=self.qos)
+                    except Exception as e:
+                        log.warning(f"[mqtt] resubscribe failed for {t}: {e}")
+
+        self.client.on_connect = _on_connect
+        self.client.on_message = self._on_message  # см. метод ниже
+
         self.base = conf.get("base_topic", "/devices").rstrip("/")
         if not self.base.startswith("/"): self.base = "/" + self.base
         self.qos = int(conf.get("qos", 0)); self.retain = bool(conf.get("retain", False))
@@ -43,6 +59,51 @@ class MqttBridge:
         if status_details: meta["status_code"].update(status_details)
         payload = {"value": (value if value is None else str(value)), "metadata": meta}
         self.out_queue.put((topic, payload, context or {}))
+
+    def register_on_topic(self, topic: str, handler: Callable[[str], bool]) -> None:
+        """
+        Регистрируем обработчик для команды записи.
+        topic может быть относительным — тогда префиксуем base_topic.
+        handler получает строковое payload (как есть).
+        """
+        if not topic.startswith("/"):
+            topic = f"{self.base}/{topic}".replace("//", "/")
+        with self._lock:
+            self._handlers[topic] = handler
+        try:
+            self.client.subscribe(topic, qos=self.qos)
+            log.info(f"[mqtt] subscribed: {topic}")
+        except Exception as e:
+            # если ещё не подключены — подпишемся в on_connect
+            log.debug(f"[mqtt] subscribe deferred for {topic}: {e}")
+
+    def unregister_on_topic(self, topic: str) -> None:
+        if not topic.startswith("/"):
+            topic = f"{self.base}/{topic}".replace("//", "/")
+        with self._lock:
+            self._handlers.pop(topic, None)
+        try:
+            self.client.unsubscribe(topic)
+            log.info(f"[mqtt] unsubscribed: {topic}")
+        except Exception:
+            pass
+
+    def _on_message(self, client, userdata, msg):
+        topic = msg.topic
+        payload = msg.payload
+        try:
+            s = payload.decode("utf-8", errors="ignore")
+        except Exception:
+            s = str(payload)
+        handler = None
+        with self._lock:
+            handler = self._handlers.get(topic)
+        if handler:
+            try:
+                ok = handler(s)
+                log.debug(f"[mqtt] handler for {topic} returned {ok}")
+            except Exception as e:
+                log.error(f"[mqtt] handler error for {topic}: {e}")
 
     def _publisher_loop(self):
         H = settings.history

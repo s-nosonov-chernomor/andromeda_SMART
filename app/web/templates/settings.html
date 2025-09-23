@@ -110,6 +110,15 @@
       </div>
     </div>
 
+    <!-- Serial -->
+    <div class="card" style="padding:12px">
+      <h3>Serial</h3>
+      <div class="grid">
+        <label class="label" title="Если драйвер/трансивер возвращает отправленные байты обратно в RX">Эхо на порту (RS-485 loopback)</label>
+        <div><input id="serial_echo" type="checkbox"> <span class="muted">включить режим «эхо»</span></div>
+      </div>
+    </div>
+
     <!-- Debug -->
     <div class="card" style="padding:12px">
       <h3>DEBUG</h3>
@@ -361,6 +370,10 @@
     qs('#dbg_enabled').checked = !!g.debug.enabled;
     qs('#dbg_reads').checked = !!g.debug.log_reads;
     qs('#dbg_summary').value = g.debug.summary_every_s ?? 0;
+
+        // serial
+    qs('#serial_echo').checked = !!(g.serial && g.serial.echo);
+
   }
 
   async function saveGeneral(){
@@ -397,7 +410,11 @@
         enabled: qs('#dbg_enabled').checked,
         log_reads: qs('#dbg_reads').checked,
         summary_every_s: +qs('#dbg_summary').value
+      },
+      serial: {
+        echo: qs('#serial_echo').checked
       }
+
     };
     await apiJson('/api/settings/general', {
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)

@@ -12,7 +12,7 @@ mqtt:
 db:
   url: sqlite:///./data/data.db
 polling:
-  interval_ms: 2000
+  interval_ms: 500
   jitter_ms: 120
   backoff_ms: 500
   max_errors_before_backoff: 5
@@ -23,12 +23,12 @@ polling:
     max_registers: 60
 lines:
 - name: line1
-  device: COM41
+  device: COM4
   baudrate: 115200
   timeout: 0.1
   parity: N
   stopbits: 1
-  port_retry_backoff_s: 0
+  port_retry_backoff_s: 1
   nodes:
   - unit_id: 44
     object: object1_io2
@@ -63,3 +63,5 @@ history:
 backups:
   dir: ./data/backups
   keep: 10
+serial:
+  echo: false

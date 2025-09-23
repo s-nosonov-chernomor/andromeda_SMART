@@ -50,6 +50,13 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if not url:
         raise ValueError("db.url: обязателен (например sqlite:///./data/data.db)")
 
+    # ─── serial ───
+    serial = cfg.get("serial", {})
+    if serial and not isinstance(serial, dict):
+        raise ValueError("serial: должен быть объектом")
+    if "echo" in serial and not isinstance(serial["echo"], bool):
+        raise ValueError("serial.echo: должен быть true/false")
+
     # ─── history ───
     hist = cfg.get("history", {})
     if not isinstance(hist, dict):
