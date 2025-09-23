@@ -153,7 +153,8 @@ def restart_service():
       4) иначе 501 с подсказкой.
     """
     cfg = settings.get_cfg() or {}
-    sec = (cfg.get("service") or {})
+    # сперва смотрим andromeda.restart_cmd, если нет — откатываемся к service.*
+    sec = (cfg.get("andromeda") or cfg.get("service") or {})
     unit = sec.get("unit", "uspd.service")
     custom = sec.get("restart_cmd")
 

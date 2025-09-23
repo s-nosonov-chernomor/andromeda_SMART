@@ -70,3 +70,5 @@ addressing:
 service:
   unit: agent.service         # имя вашего systemd unit
   restart_cmd: ""            # можно не задавать
+andromeda:
+  restart_cmd: "/usr/local/bin/restart-andromeda.sh"
