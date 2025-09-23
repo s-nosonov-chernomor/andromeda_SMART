@@ -57,6 +57,12 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if "echo" in serial and not isinstance(serial["echo"], bool):
         raise ValueError("serial.echo: должен быть true/false")
 
+    adr = cfg.get("addressing", {})
+    if adr and not isinstance(adr, dict):
+        raise ValueError("addressing: must be an object")
+    if "normalize" in adr and not isinstance(adr["normalize"], bool):
+        raise ValueError("addressing.normalize must be boolean")
+
     # ─── history ───
     hist = cfg.get("history", {})
     if not isinstance(hist, dict):
@@ -88,6 +94,8 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if not isinstance(dbg, dict):
         raise ValueError("debug: должен быть объектом")
     _as_int(dbg.get("summary_every_s", 0), "debug.summary_every_s", 0)
+
+
 
     # ─── lines/nodes/params ───
     lines = cfg.get("lines", [])

@@ -163,6 +163,7 @@ def get_general():
         "history": cfg.get("history", {}),
         "debug": cfg.get("debug", {}),
         "serial": cfg.get("serial", {}),
+        "addressing": cfg.get("addressing", {"normalize": True}),
     }
 
 @router.put("/general")
@@ -178,6 +179,9 @@ def put_general(body: Dict[str, Any]):
     cfg["history"] = body["history"]
     cfg["debug"] = body["debug"]
     cfg["serial"] = body["serial"] or {"echo": False}
+    cfg["addressing"] = {
+        "normalize": bool((body.get("addressing") or {}).get("normalize", True))  # ← ДОБАВЬ ЭТО
+    }
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}

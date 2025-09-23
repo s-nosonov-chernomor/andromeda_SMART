@@ -65,3 +65,8 @@ backups:
   keep: 10
 serial:
   echo: false
+addressing:
+  normalize: false   # true — принимаем 1-based/30001/40001; false — адрес «как есть» (raw)
+service:
+  unit: agent.service         # имя вашего systemd unit
+  restart_cmd: ""            # можно не задавать

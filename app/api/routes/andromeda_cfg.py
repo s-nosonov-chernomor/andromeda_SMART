@@ -6,9 +6,7 @@ import os, yaml, shutil, time
 from pathlib import Path
 import subprocess, platform
 
-
 from app.core.config import settings  # ← добавили
-
 from app.core.validate_andromeda import validate_andromeda_cfg
 
 # путь к файлу конфигурации «Андромеды»
@@ -145,22 +143,47 @@ def ui_andromeda(request: Request):
     return templates.TemplateResponse("andromeda.html", {"request": request})
 
 @router.post("/api/andromeda/restart")
-def restart_andromeda_agent():
+def restart_service():
     """
-    Перезапускает systemd-сервис агентa Андромеды.
-    Требует Linux и права на systemctl (либо sudoers/polkit).
+    Рестарт основного сервиса на Linux.
+    Порядок:
+      1) если в YAML задан service.restart_cmd — выполнить её;
+      2) если есть systemctl — systemctl restart <unit>;
+      3) если есть service — service <unit> restart;
+      4) иначе 501 с подсказкой.
     """
-    if platform.system() != "Linux":
-        raise HTTPException(status_code=501, detail="Перезапуск доступен только в Linux (systemd)")
+    cfg = settings.get_cfg() or {}
+    sec = (cfg.get("service") or {})
+    unit = sec.get("unit", "uspd.service")
+    custom = sec.get("restart_cmd")
 
-    cmd = ["systemctl", "restart", "agent.service"]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if res.returncode != 0:
-            err = (res.stderr or res.stdout or "").strip()
-            raise HTTPException(status_code=500, detail=f"systemctl exit {res.returncode}: {err}")
-        return {"ok": True}
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="systemctl timeout")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"restart failed: {e}")
+    # 1) кастомная команда из YAML
+    if custom:
+        try:
+            subprocess.run(custom, shell=True, check=True)
+            return {"ok": True, "via": "restart_cmd", "cmd": custom}
+        except Exception as e:
+            raise HTTPException(500, f"restart_cmd failed: {e}")
+
+    # 2) systemctl (systemd)
+    if shutil.which("systemctl"):
+        try:
+            subprocess.run(["systemctl", "restart", unit], check=True)
+            return {"ok": True, "via": "systemctl", "unit": unit}
+        except Exception as e:
+            raise HTTPException(500, f"systemctl restart {unit} failed: {e}")
+
+    # 3) service (SysVinit/OpenRC совместимость)
+    if shutil.which("service"):
+        try:
+            subprocess.run(["service", unit, "restart"], check=True)
+            return {"ok": True, "via": "service", "unit": unit}
+        except Exception as e:
+            raise HTTPException(500, f"service {unit} restart failed: {e}")
+
+    # 4) нет ни systemctl, ни service
+    raise HTTPException(
+        501,
+        "На хосте нет systemctl/service. "
+        "Добавьте в YAML: service.restart_cmd: '<команда рестарта>'"
+    )

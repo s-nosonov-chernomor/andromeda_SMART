@@ -119,6 +119,21 @@
       </div>
     </div>
 
+    <!-- Addressing -->
+    <div class="card" style="padding:12px">
+      <h3>Адресация</h3>
+      <div class="grid">
+        <label class="label" title="Если включено — принимаем 1-based/30001/40001 и приводим к PDU-адресам. Если выключено — адрес «как есть».">
+          Нормализовать адреса
+        </label>
+        <div>
+          <input id="addr_norm" type="checkbox">
+          <span class="muted">1-based / 30001 / 40001 → PDU</span>
+        </div>
+      </div>
+    </div>
+
+
     <!-- Debug -->
     <div class="card" style="padding:12px">
       <h3>DEBUG</h3>
@@ -371,8 +386,13 @@
     qs('#dbg_reads').checked = !!g.debug.log_reads;
     qs('#dbg_summary').value = g.debug.summary_every_s ?? 0;
 
-        // serial
+    // serial
     qs('#serial_echo').checked = !!(g.serial && g.serial.echo);
+
+    // addressing
+    const adr = g.addressing || {};
+    qs('#addr_norm').checked = (adr.normalize !== false); // по умолчанию true
+
 
   }
 
@@ -413,7 +433,11 @@
       },
       serial: {
         echo: qs('#serial_echo').checked
+      },
+      addressing: {
+        normalize: qs('#addr_norm').checked
       }
+
 
     };
     await apiJson('/api/settings/general', {

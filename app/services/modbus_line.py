@@ -124,6 +124,9 @@ class ModbusLine(threading.Thread):
             "log_reads": bool(settings.debug.get("log_reads", False)),
             "summary_every_s": int(settings.debug.get("summary_every_s", 0)),
         }
+        # Адреса: использовать «человеческие» (1-based/30001/40001) или «сырые»
+        adr = settings.get_cfg().get("addressing", {}) or {}
+        self.addr_normalize = bool(adr.get("normalize", True))
 
         # Batch-read лимиты
         self.batch = (self.poll.get("batch_read") or {})
@@ -350,8 +353,9 @@ class ModbusLine(threading.Thread):
     def _normalize_addr(self, p: ParamCfg) -> int:
         """В debug.enabled нормализуем 40001/30001 и 1-based coils/discretes."""
         a = int(p.address)
-        if not self.debug.get("enabled", False):
+        if not getattr(self, "addr_normalize", True):
             return a
+
         na = a
         if p.register_type == "holding" and a >= 40001:
             na = a - 40001
