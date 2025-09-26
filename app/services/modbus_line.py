@@ -71,6 +71,9 @@ def _iso_utc_ms() -> str:
     dt = datetime.now(timezone.utc)
     return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+def _func_code(reg_type: str) -> int:
+    return {"coil": 1, "discrete": 2, "holding": 3, "input": 4}.get(reg_type, 0)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Класс линии Modbus RTU
@@ -124,6 +127,13 @@ class ModbusLine(threading.Thread):
             "log_reads": bool(settings.debug.get("log_reads", False)),
             "summary_every_s": int(settings.debug.get("summary_every_s", 0)),
         }
+        # детальная трассировка
+        self.trace_frames = bool(settings.debug.get("trace_frames", False))
+        if self.trace_frames:
+            # поднимем уровни логгеров, чтобы увидеть Tx/Rx и сериал
+            logging.getLogger("minimalmodbus").setLevel(logging.DEBUG)
+            logging.getLogger("serial").setLevel(logging.DEBUG)
+
         # Адреса: использовать «человеческие» (1-based/30001/40001) или «сырые»
         adr = settings.get_cfg().get("addressing", {}) or {}
         self.addr_normalize = bool(adr.get("normalize", True))
@@ -190,12 +200,14 @@ class ModbusLine(threading.Thread):
         base = getattr(self.mqtt, "base", "/devices")
         return topic_like if topic_like.startswith("/") else f"{base}/{topic_like}"
 
+    # ───────────────────────── MQTT публикация ─────────────────────────
     def _mqtt_publish(self, topic_like: str, value: Optional[float], code: int,
-                      message: str, silent_for_s: int, ctx: Dict[str, Any]):
+                      message: str, silent_for_s: int, ctx: Dict[str, Any],
+                      trigger: Optional[str], no_reply: int):
         """
-        Унифицированная публикация JSON.
-        Сначала пытаемся вызвать современный MqttBridge.publish(...),
-        иначе собираем JSON вручную и шлём через client.publish.
+        Единая публикация JSON.
+        - trigger: 'change' | 'interval' | 'heartbeat'
+        - no_reply: текущий счётчик подряд неответов для данного unit_id
         """
         payload = {
             "value": None if value is None else (value if isinstance(value, (int, float)) else str(value)),
@@ -203,27 +215,35 @@ class ModbusLine(threading.Thread):
                 "timestamp": _iso_utc_ms(),
                 "status_code": {"code": int(code), "message": str(message)},
                 "silent_for_s": int(silent_for_s),
-                "context": ctx
+                "trigger": trigger,  # ← тип публикации
+                "context": {**ctx, "no_reply": int(no_reply)}  # ← счётчик неответов
             }
         }
 
-        # Новый Мост умеет publish(...)? — используем его
+        # Если мост умеет high-level publish(...)
         if hasattr(self.mqtt, "publish") and callable(getattr(self.mqtt, "publish")):
             try:
-                self.mqtt.publish(topic_like, value, code=code,
-                                  status_details={"message": message, "silent_for_s": silent_for_s},
-                                  context=ctx)
+                # кладём trigger в status_details и в context на всякий случай
+                self.mqtt.publish(
+                    topic_like,
+                    value,
+                    code=code,
+                    status_details={"message": message, "silent_for_s": silent_for_s, "trigger": trigger},
+                    context={**ctx, "no_reply": int(no_reply), "trigger": trigger}
+                )
                 return
             except Exception as e:
                 self.log.warning(f"mqtt.publish failed, fallback to raw json: {e}")
 
-        # Иначе публикуем сами
+        # Fallback: руками через paho
         topic_abs = self._abs_topic(topic_like)
         try:
-            # paho client есть во всех версиях моста
-            self.mqtt.client.publish(topic_abs, json.dumps(payload, ensure_ascii=False),
-                                     qos=getattr(self.mqtt, "qos", 0),
-                                     retain=getattr(self.mqtt, "retain", False))
+            self.mqtt.client.publish(
+                topic_abs,
+                json.dumps(payload, ensure_ascii=False),
+                qos=getattr(self.mqtt, "qos", 0),
+                retain=getattr(self.mqtt, "retain", False)
+            )
         except Exception as e:
             self.log.error(f"MQTT publish error [{topic_abs}]: {e}")
 
@@ -331,6 +351,10 @@ class ModbusLine(threading.Thread):
                     )
                 except Exception as e:
                     self.log.warning(f"RS485 toggle failed: {e}")
+
+            # сырые кадры TX/RX от minimalmodbus (печатает Tx:/Rx:)
+            if self.trace_frames and hasattr(inst, "debug"):
+                inst.debug = True
 
             self._instruments[unit_id] = inst
             if self._port_fault:
@@ -459,11 +483,12 @@ class ModbusLine(threading.Thread):
             "param": p.name,
         }
 
+    # ───────────────────────── публикация/heartbeat/«текущие» ─────────────────
     def _maybe_publish(self, nd: NodeCfg, p: ParamCfg, value: Optional[float], code: int, message: str,
                        last_ok_ts: Optional[float], last_attempt_ts: Optional[float]):
         """
-        Логика публикации по режимам + обновление «текущих».
-        При ошибке (code!=0) heartbeat шлём только если режим включает интервал и он наступил.
+        Публикация по режимам + обновление «текущих».
+        При ошибке (code!=0) делаем heartbeat по интервалу (если он задан).
         """
         key = self._make_key(nd.unit_id, p.name)
         now = _now_ms()
@@ -476,48 +501,54 @@ class ModbusLine(threading.Thread):
         changed = (value is not None) and (last_val is None or value != last_val)
 
         topic_like = self._pub_topic_for(nd, p)
-        ctx = self._ctx(nd, p)
+        base_ctx = self._ctx(nd, p)
+        no_reply = int(self._no_reply.get(nd.unit_id, 0))
 
-        def pub(val, c, msg, silent_s):
-            self._mqtt_publish(topic_like, val, c, msg, int(silent_s), ctx)
+        def pub(val, c, msg, silent_s, trig: str):
+            self._mqtt_publish(topic_like, val, c, msg, int(silent_s), base_ctx, trig, no_reply)
             self._last_pub_ts[key] = now
 
         if code == 0:
             # OK-путь
             if mode in ("on_change_and_interval", "both"):
-                if changed or due_interval:
-                    pub(value, 0, "OK", 0)
+                if changed:
+                    pub(value, 0, "OK", 0, "change")
+                if due_interval:
+                    pub(value, 0, "OK", 0, "interval")
             elif mode == "on_change":
                 if changed:
-                    pub(value, 0, "OK", 0)
+                    pub(value, 0, "OK", 0, "change")
             elif mode == "interval":
                 if due_interval:
-                    pub(value, 0, "OK", 0)
+                    pub(value, 0, "OK", 0, "interval")
             else:
-                # неизвестный режим → как on_change
                 if changed:
-                    pub(value, 0, "OK", 0)
+                    pub(value, 0, "OK", 0, "change")
 
-            # обновим last_values и «текущие»
+            # обновить last_values и «текущие»
             self._last_values[key] = value  # type: ignore
-            state.update(self.name_, nd.unit_id, nd.object, p.name,
-                         topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt,'base','/devices')}/{topic_like}",
-                         p.register_type, self._normalize_addr(p),
-                         value, 0, "OK",
-                         last_ok_ts or now, last_attempt_ts or now)
+            state.update(
+                self.name_, nd.unit_id, nd.object, p.name,
+                topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt, 'base', '/devices')}/{topic_like}",
+                p.register_type, self._normalize_addr(p),
+                value, 0, "OK",
+                last_ok_ts or now, last_attempt_ts or now
+            )
             return
 
         # Ошибка: heartbeat в интервале
         silent_for = int(now - (last_ok_ts or now))
         if mode in ("on_change_and_interval", "both", "interval") and due_interval:
-            pub(None, code, message, silent_for)
+            pub(None, code, message, silent_for, "heartbeat")
 
         # «текущие» при ошибке
-        state.update(self.name_, nd.unit_id, nd.object, p.name,
-                     topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt,'base','/devices')}/{topic_like}",
-                     p.register_type, self._normalize_addr(p),
-                     None, code, message,
-                     last_ok_ts or 0.0, last_attempt_ts or now)
+        state.update(
+            self.name_, nd.unit_id, nd.object, p.name,
+            topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt, 'base', '/devices')}/{topic_like}",
+            p.register_type, self._normalize_addr(p),
+            None, code, message,
+            last_ok_ts or 0.0, last_attempt_ts or now
+        )
 
     # ───────────────────────── маппинг ошибок ─────────────────────────────────
     def _map_ex(self, e: Exception) -> Tuple[int, str]:
@@ -567,6 +598,14 @@ class ModbusLine(threading.Thread):
                             pass
 
                     for rtype, start, count, group_params in blocks:
+                        if self.debug.get("enabled"):
+                            fc = _func_code(rtype)
+                            # первый «сырой» адрес из YAML для наглядности
+                            raw_first = group_params[0].address if group_params else start
+                            self.log.debug(
+                                f"REQ unit={nd.unit_id} fc={fc} type={rtype} "
+                                f"start={start} count={count} (yaml_first={raw_first})"
+                            )
                         try:
                             if rtype == "coil":
                                 block_vals = self._read_block_bits(inst, start, count, functioncode=1)
@@ -578,6 +617,12 @@ class ModbusLine(threading.Thread):
                                 block_vals = self._read_block_regs(inst, start, count, functioncode=4)
                             else:
                                 raise ValueError(f"unknown register_type: {rtype}")
+
+                            if self.debug.get("enabled"):
+                                self.log.debug(
+                                    f"RSP unit={nd.unit_id} fc={_func_code(rtype)} "
+                                    f"values={len(block_vals)} ok"
+                                )
 
                             # успех блока
                             for i, p in enumerate(group_params):
@@ -596,7 +641,18 @@ class ModbusLine(threading.Thread):
                         except Exception as e:
                             code, msg = self._map_ex(e)
                             if self.debug.get("enabled"):
-                                self.log.error(f"block read error {rtype}[{start}..{start+count-1}] → {e}")
+                                fc = _func_code(rtype)
+                                self.log.error(
+                                    f"block read error unit={nd.unit_id} fc={fc} type={rtype} "
+                                    f"range=[{start}..{start + count - 1}] port={self.port} → {e}"
+                                )
+                                # небольшая подсказка при частом 0x02/0x10:
+                                self.log.error(
+                                    "hint: Illegal Data Address чаще всего = не тот адрес/диапазон. "
+                                    "Проверь normalize-правило и off-by-one (например 1001 vs 1000), "
+                                    "а также лимиты batch_read.max_bits/regs."
+                                )
+
                             self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
                             for i, p in enumerate(group_params):
                                 key = self._make_key(nd.unit_id, p.name)
@@ -615,8 +671,29 @@ class ModbusLine(threading.Thread):
                     except Exception:
                         pass
                 for p in nd.params:
+
+                    if self.debug.get("enabled"):
+                        fc = _func_code(p.register_type)
+                        addr_norm = self._normalize_addr(p)
+                        self.log.debug(
+                            f"REQ unit={nd.unit_id} fc={fc} type={p.register_type} "
+                            f"addr={addr_norm} (yaml={p.address})"
+                        )
+
                     key = self._make_key(nd.unit_id, p.name)
                     val, code, msg = self._read_single(inst, p)
+
+                    if self.debug.get("enabled"):
+                        if val is not None:
+                            self.log.debug(
+                                f"RSP unit={nd.unit_id} fc={_func_code(p.register_type)} val={val}"
+                            )
+                        else:
+                            self.log.error(
+                                f"single read error unit={nd.unit_id} fc={_func_code(p.register_type)} "
+                                f"addr={self._normalize_addr(p)} (yaml={p.address}) → {msg}"
+                            )
+
                     now = _now_ms()
                     self._last_attempt_ts[key] = now
                     if val is None:

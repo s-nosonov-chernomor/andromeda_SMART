@@ -53,7 +53,8 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
           <th>Объект</th>
           <th>Параметр</th>
           <th>Значение</th>
-          <th>Время</th>
+          <th>Время опроса</th>
+          <th>Время публикации</th>
           <th>Статус</th>
           <th>Описание</th>
           <th class="right">Линия</th>
@@ -216,7 +217,23 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
         <td>${safeStr(x.object)}</td>
         <td>${safeStr(x.param)}</td>
         <td>${valCell(x)}</td>
-        <td class="mono">${fmtTs(x.ts)}<br><span class="muted">${fmtSilent(x.silent_for_s)}</span></td>
+
+        <!-- Время опроса -->
+        <td class="mono">
+          ${fmtTs(x.last_ok_ts)}<br>
+          <span class="muted tick" data-type="ok" data-ts="${x.last_ok_ts || ''}">
+            ${fmtSilent(x.since_last_ok_s)}
+          </span>
+        </td>
+
+        <!-- Время публикации -->
+        <td class="mono">
+          ${fmtTs(x.last_pub_ts)}<br>
+          <span class="muted tick" data-type="pub" data-ts="${x.last_pub_ts || ''}">
+            ${fmtSilent(x.since_last_pub_s)}
+          </span>
+        </td>
+
         <td>${statusChip(x)}</td>
         <td>${safeStr(x.message)}</td>
         <td class="right">${safeStr(x.line)}</td>
@@ -230,6 +247,8 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     }
 
     updInfo.textContent = `Обновлено: ${fmtTime()} • всего: ${list.length} • показано: ${filtered.length}`;
+    updateTicksOnce();
+
   }
 
   async function load(){
@@ -251,6 +270,30 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     if (!paused && everyMs > 0) {
       timer = setInterval(load, everyMs);
     }
+  }
+    // ───────── тикер секундомеров (локально раз/сек) ─────────
+  let tickTimer = null;
+
+  function updateTicksOnce(){
+    const now = Date.now();
+    document.querySelectorAll('span.tick').forEach(el=>{
+      const ts = el.getAttribute('data-ts');
+      if (!ts) { el.textContent = ''; return; }
+      const t = Date.parse(ts);
+      if (isNaN(t)) { el.textContent = ''; return; }
+      const secs = Math.max(0, Math.floor((now - t) / 1000));
+      el.textContent = `${secs}s`;
+    });
+  }
+
+  function startTicking(){
+    if (tickTimer) return;
+    updateTicksOnce(); // сразу обновим после рендера
+    tickTimer = setInterval(updateTicksOnce, 1000);
+  }
+
+  function stopTicking(){
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
   }
 
   // events
@@ -300,6 +343,7 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
 
   load();
   reschedule();
+  startTicking();
 
 })();
 </script>

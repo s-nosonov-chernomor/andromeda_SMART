@@ -1,7 +1,7 @@
 # app/services/current_store.py
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Tuple, List, Any, Optional
 import threading
 
@@ -13,10 +13,19 @@ class ParamState:
     unit_id: int
     register_type: str
     address: int
-    value: Optional[str] = None
+
+    value: Optional[Any] = None
     code: int = 0
     message: str = ""
-    ts: Optional[datetime] = None  # время ПОСЛЕДНЕГО успешного ответа
+
+    # Время последнего УДАЧНОГО опроса (то, что ты хочешь как «Время опроса»)
+    last_ok_ts: Optional[datetime] = None
+    # Время ПОСЛЕДНЕЙ публикации (любая публикация: по изменению/интервалу/ошибке)
+    last_pub_ts: Optional[datetime] = None
+
+    # Доп. атрибуты для UI
+    trigger: Optional[str] = None          # "change" | "interval" | None
+    no_reply: int = 0                      # счётчик подряд неответов
 
 Key = Tuple[str, int, str, str]  # (line, unit_id, object, param)
 
@@ -25,23 +34,22 @@ class CurrentStore:
         self._lock = threading.RLock()
         self._items: Dict[Key, ParamState] = {}
 
-    # вызывать при запуске и после изменений YAML
     def reset_from_cfg(self, cfg: Dict[str, Any]) -> None:
         with self._lock:
             new_items: Dict[Key, ParamState] = {}
-            for ln in cfg.get("lines", []):
+            for ln in cfg.get("lines", []) or []:
                 line = str(ln.get("name", ""))
-                for nd in ln.get("nodes", []):
+                for nd in ln.get("nodes", []) or []:
                     unit = int(nd.get("unit_id", 0))
                     obj  = str(nd.get("object", ""))
-                    for p in nd.get("params", []):
+                    for p in nd.get("params", []) or []:
                         name = str(p.get("name", ""))
                         if not (line and name and obj):
                             continue
                         key: Key = (line, unit, obj, name)
                         prev = self._items.get(key)
                         if prev:
-                            # сохраняем предыдущее значение/время, но обновим тип/адрес если изменились
+                            # бережно переносим старые времена/значения
                             prev.register_type = str(p.get("register_type", prev.register_type))
                             prev.address = int(p.get("address", prev.address))
                             new_items[key] = prev
@@ -54,11 +62,17 @@ class CurrentStore:
                                 register_type=str(p.get("register_type", "")),
                                 address=int(p.get("address", 0)),
                             )
-            # заменяем полностью: удалённые в YAML исчезают из «текущих»
             self._items = new_items
 
-    # вызывать из MQTT-паблишера после успешной публикации значения/статуса
     def apply_publish(self, ctx: Dict[str, Any], payload: Dict[str, Any], ts: datetime) -> None:
+        """
+        Вызывай из MQTT-бриджа сразу после успешной публикации.
+        Мы читаем:
+          - metadata.status_code.{code,message}
+          - metadata.silent_for_s  (сколько секунд прошло с последнего УСПЕШНОГО ответа)
+          - metadata.trigger       ("change"/"interval")
+          - metadata.no_reply      (счётчик подряд неответов)
+        """
         line = str(ctx.get("line", ""))
         unit = int(ctx.get("unit_id", 0))
         obj  = str(ctx.get("object", ""))
@@ -70,11 +84,15 @@ class CurrentStore:
         sc = (md.get("status_code", {}) or {})
         code = int(sc.get("code", 0))
         message = str(sc.get("message", "OK"))
+        trigger = md.get("trigger") or None
+        silent_for_s = md.get("silent_for_s", None)
+        try:
+            silent_for_s = int(silent_for_s) if silent_for_s is not None else None
+        except Exception:
+            silent_for_s = None
+        no_reply = int(md.get("no_reply", 0) or 0)
 
         value = payload.get("value", None)
-        # В API возвращаем None (а не строку "null")
-        if isinstance(value, str) and value.lower() == "null":
-            value = None
 
         key: Key = (line, unit, obj, name)
         with self._lock:
@@ -85,23 +103,39 @@ class CurrentStore:
                     register_type=rtype, address=addr
                 )
                 self._items[key] = st
+
             st.value = value
             st.code = code
             st.message = message
             st.register_type = rtype or st.register_type
             st.address = addr or st.address
-            # Обновляем «последний успех». Если код ≠ 0 и это неуспех — ts не трогаем.
+
+            # Всегда фиксируем время публикации
+            st.last_pub_ts = ts
+            st.trigger = trigger
+            st.no_reply = no_reply
+
+            # Время ПОСЛЕДНЕГО успешного опроса:
+            #  - при code == 0 — это текущая публикация;
+            #  - при ошибке — если есть silent_for_s, восстановим last_ok_ts = ts - silent_for_s;
             if code == 0:
-                st.ts = ts
+                st.last_ok_ts = ts
+            elif silent_for_s is not None:
+                st.last_ok_ts = ts - timedelta(seconds=int(silent_for_s))
+            # если silent_for_s нет — оставляем как было
 
     def list(self) -> List[Dict[str, Any]]:
         now = datetime.now(timezone.utc)
         with self._lock:
             out: List[Dict[str, Any]] = []
             for st in self._items.values():
-                silent_for_s = None
-                if st.ts is not None:
-                    silent_for_s = int((now - st.ts).total_seconds())
+                since_ok = None
+                since_pub = None
+                if st.last_ok_ts is not None:
+                    since_ok = max(0, int((now - st.last_ok_ts).total_seconds()))
+                if st.last_pub_ts is not None:
+                    since_pub = max(0, int((now - st.last_pub_ts).total_seconds()))
+
                 out.append({
                     "object": st.object,
                     "param": st.param,
@@ -112,8 +146,18 @@ class CurrentStore:
                     "unit_id": st.unit_id,
                     "register_type": st.register_type,
                     "address": st.address,
-                    "ts": st.ts.isoformat() if st.ts else None,
-                    "silent_for_s": silent_for_s,
+
+                    # новое
+                    "last_ok_ts": st.last_ok_ts.isoformat() if st.last_ok_ts else None,
+                    "last_pub_ts": st.last_pub_ts.isoformat() if st.last_pub_ts else None,
+                    "since_last_ok_s": since_ok,
+                    "since_last_pub_s": since_pub,
+                    "trigger": st.trigger,
+                    "no_reply": st.no_reply,
+
+                    # для обратной совместимости со старым фронтом:
+                    "ts": st.last_ok_ts.isoformat() if st.last_ok_ts else None,
+                    "silent_for_s": since_ok,
                 })
             return out
 
