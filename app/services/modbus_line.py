@@ -14,6 +14,9 @@ from datetime import datetime, timezone
 
 import minimalmodbus
 import serial
+import math, struct
+
+
 try:
     # RS485 режим доступен не везде — используем опционально
     from serial.rs485 import RS485Settings
@@ -22,6 +25,7 @@ except Exception:  # pragma: no cover
 
 from app.core.config import settings
 from app.core import state  # state.update(...) для «текущих»
+from app.services.current_store import current_store
 # примечание: MqttBridge импортировать только для type hints, чтобы не ловить циклы
 # from app.services.mqtt_bridge import MqttBridge
 
@@ -45,6 +49,11 @@ class ParamCfg:
     error_state: Optional[int] = None  # 0/1 или None
     display_error_text: Optional[str] = None
     mqttROM: Optional[str] = None
+    step: Optional[float] = None
+    hysteresis: Optional[float] = None
+    words: int = 1
+    data_type: str = "u16"         # u16|s16|u32|s32|f32
+    word_order: str = "AB"         # AB|BA (BA = word swap)
 
 @dataclass
 class NodeCfg:
@@ -127,6 +136,13 @@ class ModbusLine(threading.Thread):
             "log_reads": bool(settings.debug.get("log_reads", False)),
             "summary_every_s": int(settings.debug.get("summary_every_s", 0)),
         }
+
+        # Настройка пульса в current_store (last_ok_ts без публикации)
+        cursec = (settings.get_cfg().get("current") or {})
+        self.touch_read_every_s: float = float(cursec.get("touch_read_every_s", 3))
+        # Последний раз, когда мы «тыкали» current_store по данному параметру
+        self._last_store_touch_ok: Dict[str, float] = {}
+
         # детальная трассировка
         self.trace_frames = bool(settings.debug.get("trace_frames", False))
         if self.trace_frames:
@@ -171,6 +187,8 @@ class ModbusLine(threading.Thread):
         # Флаг остановки
         self._stop = threading.Event()
 
+        self._bands: Dict[str, Tuple[float, float]] = {}  # key -> (low_adj, high_adj)
+
     # ───────────────────────── общая жизнедеятельность ─────────────────────────
     def stop(self):
         self._stop.set()
@@ -201,49 +219,74 @@ class ModbusLine(threading.Thread):
         return topic_like if topic_like.startswith("/") else f"{base}/{topic_like}"
 
     # ───────────────────────── MQTT публикация ─────────────────────────
-    def _mqtt_publish(self, topic_like: str, value: Optional[float], code: int,
-                      message: str, silent_for_s: int, ctx: Dict[str, Any],
-                      trigger: Optional[str], no_reply: int):
+    def _mqtt_publish(
+            self,
+            topic_like: str,
+            value: Optional[float],
+            code: int,
+            message: str,
+            silent_for_s: int,
+            ctx: Dict[str, Any],
+            trigger: Optional[str],
+            no_reply: int,
+    ):
         """
         Единая публикация JSON.
         - trigger: 'change' | 'interval' | 'heartbeat'
         - no_reply: текущий счётчик подряд неответов для данного unit_id
         """
+        # payload для сырой публикации И для current_store.apply_publish
         payload = {
             "value": None if value is None else (value if isinstance(value, (int, float)) else str(value)),
             "metadata": {
                 "timestamp": _iso_utc_ms(),
                 "status_code": {"code": int(code), "message": str(message)},
                 "silent_for_s": int(silent_for_s),
-                "trigger": trigger,  # ← тип публикации
-                "context": {**ctx, "no_reply": int(no_reply)}  # ← счётчик неответов
-            }
+                "trigger": trigger,
+                # ВАЖНО: кладём счётчик неответов именно в metadata, как ждёт current_store
+                "no_reply": int(no_reply),
+                # в context — полезные детали идентификации
+                "context": dict(ctx),
+            },
         }
 
-        # Если мост умеет high-level publish(...)
+        # 1) high-level publish(...) у моста
         if hasattr(self.mqtt, "publish") and callable(getattr(self.mqtt, "publish")):
             try:
-                # кладём trigger в status_details и в context на всякий случай
                 self.mqtt.publish(
                     topic_like,
                     value,
                     code=code,
-                    status_details={"message": message, "silent_for_s": silent_for_s, "trigger": trigger},
-                    context={**ctx, "no_reply": int(no_reply), "trigger": trigger}
+                    status_details={
+                        "message": message,
+                        "silent_for_s": silent_for_s,
+                        "trigger": trigger,
+                        "no_reply": int(no_reply),
+                    },
+                    context={**ctx, "trigger": trigger, "no_reply": int(no_reply)},
                 )
+                # сразу отразим публикацию в current_store
+                try:
+                    current_store.apply_publish(ctx, payload, datetime.now(timezone.utc))
+                except Exception as ie:
+                    self.log.debug(f"current_store.apply_publish failed: {ie}")
                 return
             except Exception as e:
                 self.log.warning(f"mqtt.publish failed, fallback to raw json: {e}")
 
-        # Fallback: руками через paho
+        # 2) fallback: paho client
         topic_abs = self._abs_topic(topic_like)
         try:
             self.mqtt.client.publish(
                 topic_abs,
                 json.dumps(payload, ensure_ascii=False),
                 qos=getattr(self.mqtt, "qos", 0),
-                retain=getattr(self.mqtt, "retain", False)
+                retain=getattr(self.mqtt, "retain", False),
             )
+            try:
+                current_store.apply_publish(ctx, payload, datetime.now(timezone.utc))
+            except Exception as ie:
+                self.log.debug(f"current_store.apply_publish failed: {ie}")
         except Exception as e:
             self.log.error(f"MQTT publish error [{topic_abs}]: {e}")
 
@@ -297,6 +340,63 @@ class ModbusLine(threading.Thread):
         return handler
 
     # ───────────────────────── порт/инструмент ────────────────────────────────
+    def _decode_words(self, regs: List[int], data_type: str, word_order: str) -> float:
+        # нормализуем 16-бит
+        regs = [int(x) & 0xFFFF for x in regs]
+        order = (word_order or "AB").upper()
+        if data_type in ("u16", "s16"):
+            v = regs[0]
+            if data_type == "s16" and v & 0x8000:
+                v = v - 0x10000
+            return float(v)
+
+        if data_type in ("u32", "s32", "f32"):
+            if len(regs) < 2:
+                raise ValueError("need 2 words for 32-bit value")
+            w0, w1 = (regs[0], regs[1])
+            if order == "BA":
+                w0, w1 = w1, w0
+
+            if data_type == "f32":
+                # регистры — два big-endian 16-битовых слова
+                b = struct.pack(">HH", w0, w1)
+                return float(struct.unpack(">f", b)[0])
+
+            u32 = (w0 << 16) | w1
+            if data_type == "s32" and (u32 & 0x80000000):
+                u32 = u32 - 0x100000000
+            return float(u32)
+
+        # по умолчанию — u16
+        return float(regs[0])
+
+    def _band_make(self, v: float, step: float, hyst: float) -> Tuple[float, float]:
+        if step <= 0:
+            return (float("-inf"), float("inf"))
+        k = math.floor(v / step)
+        low = k * step
+        high = low + step
+        return (low - hyst, high + hyst)
+
+    def _analog_changed(self, key: str, v: float, step: float, hyst: float) -> bool:
+        """True, если значение вышло за текущие границы (с учётом гистерезиса)."""
+        if step is None or step <= 0:
+            # нет дискретности → сравнение по != (как раньше)
+            last = self._last_values.get(key)
+            return (last is None) or (v != last)
+        h = abs(hyst or 0.0)
+        band = self._bands.get(key)
+        if band is None:
+            # первая инициализация — считаем изменением, чтобы зафиксировать старт
+            self._bands[key] = self._band_make(v, step, h)
+            return True
+        lo, hi = band
+        if v < lo or v > hi:
+            # вышли — переносим окно к новой «ячейке»
+            self._bands[key] = self._band_make(v, step, h)
+            return True
+        return False
+
     def _inst(self, unit_id: int) -> Optional[minimalmodbus.Instrument]:
         now = _now_ms()
         if self._port_fault and now < self._port_retry_at:
@@ -403,10 +503,16 @@ class ModbusLine(threading.Thread):
                 raw = inst.read_bit(addr, functioncode=1)
             elif p.register_type == "discrete":
                 raw = inst.read_bit(addr, functioncode=2)
-            elif p.register_type == "holding":
-                raw = inst.read_register(addr, functioncode=3, signed=False)
-            elif p.register_type == "input":
-                raw = inst.read_register(addr, functioncode=4, signed=False)
+            elif p.register_type in ("holding", "input"):
+                fc = 3 if p.register_type == "holding" else 4
+                # 16-битные — как раньше
+                if (p.words <= 1) and (p.data_type in ("u16", "s16")):
+                    raw = inst.read_register(addr, functioncode=fc, signed=(p.data_type == "s16"))
+
+                else:
+                    regs = inst.read_registers(addr, max(1, int(p.words or 2)), functioncode=fc)
+                    raw = self._decode_words(regs, p.data_type or "u16", p.word_order or "AB")
+
             else:
                 return None, 10, "CONFIG_ERROR"
             val = float(raw) / _safe_scale(p.scale)
@@ -435,7 +541,12 @@ class ModbusLine(threading.Thread):
         """Группирует параметры по типу и последовательным адресам для batch-read."""
         if not params:
             return []
-        items = sorted(params, key=lambda x: (x.register_type, self._normalize_addr(x)))
+        # items = sorted(params, key=lambda x: (x.register_type, self._normalize_addr(x)))
+        items = sorted(
+            [pp for pp in params if int(getattr(pp, "words", 1) or 1) == 1],
+            key=lambda x: (x.register_type, self._normalize_addr(x))
+        )
+
         blocks: List[Tuple[str, int, int, List[ParamCfg]]] = []
 
         cur_type = items[0].register_type
@@ -484,11 +595,20 @@ class ModbusLine(threading.Thread):
         }
 
     # ───────────────────────── публикация/heartbeat/«текущие» ─────────────────
-    def _maybe_publish(self, nd: NodeCfg, p: ParamCfg, value: Optional[float], code: int, message: str,
-                       last_ok_ts: Optional[float], last_attempt_ts: Optional[float]):
+    def _maybe_publish(
+            self,
+            nd: NodeCfg,
+            p: ParamCfg,
+            value: Optional[float],
+            code: int,
+            message: str,
+            last_ok_ts: Optional[float],
+            last_attempt_ts: Optional[float],
+    ):
         """
         Публикация по режимам + обновление «текущих».
         При ошибке (code!=0) делаем heartbeat по интервалу (если он задан).
+        Также даём «пульс» в current_store (touch_read) при успешном чтении без публикации.
         """
         key = self._make_key(nd.unit_id, p.name)
         now = _now_ms()
@@ -498,7 +618,14 @@ class ModbusLine(threading.Thread):
         mode = (p.publish_mode or "on_change").lower()
         interval_ms = int(p.publish_interval_ms or 0)
         due_interval = interval_ms > 0 and ((now - last_pub) * 1000.0 >= interval_ms)
-        changed = (value is not None) and (last_val is None or value != last_val)
+        # changed = (value is not None) and (last_val is None or value != last_val)
+        if value is not None:
+            step = float(p.step) if p.step not in (None, "") else 0.0
+            hyst = float(p.hysteresis) if p.hysteresis not in (None, "") else 0.0
+            changed = self._analog_changed(key, float(value), step, hyst) if (step > 0 or hyst > 0) \
+                else ((last_val is None) or (value != last_val))
+        else:
+            changed = False
 
         topic_like = self._pub_topic_for(nd, p)
         base_ctx = self._ctx(nd, p)
@@ -509,31 +636,53 @@ class ModbusLine(threading.Thread):
             self._last_pub_ts[key] = now
 
         if code == 0:
+            did_publish = False
             # OK-путь
             if mode in ("on_change_and_interval", "both"):
                 if changed:
                     pub(value, 0, "OK", 0, "change")
+                    did_publish = True
                 if due_interval:
                     pub(value, 0, "OK", 0, "interval")
+                    did_publish = True
             elif mode == "on_change":
                 if changed:
                     pub(value, 0, "OK", 0, "change")
+                    did_publish = True
             elif mode == "interval":
                 if due_interval:
                     pub(value, 0, "OK", 0, "interval")
+                    did_publish = True
             else:
                 if changed:
                     pub(value, 0, "OK", 0, "change")
+                    did_publish = True
 
             # обновить last_values и «текущие»
             self._last_values[key] = value  # type: ignore
             state.update(
-                self.name_, nd.unit_id, nd.object, p.name,
+                self.name_,
+                nd.unit_id,
+                nd.object,
+                p.name,
                 topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt, 'base', '/devices')}/{topic_like}",
-                p.register_type, self._normalize_addr(p),
-                value, 0, "OK",
-                last_ok_ts or now, last_attempt_ts or now
+                p.register_type,
+                self._normalize_addr(p),
+                value,
+                0,
+                "OK",
+                last_ok_ts or now,
+                last_attempt_ts or now,
             )
+
+            # Если публикации не было — раз в N секунд «пульсируем» last_ok_ts в current_store
+            if not did_publish and self.touch_read_every_s > 0:
+                last_touch = self._last_store_touch_ok.get(key, 0.0)
+                if (now - last_touch) >= self.touch_read_every_s:
+                    try:
+                        current_store.touch_read(base_ctx, datetime.now(timezone.utc))
+                    finally:
+                        self._last_store_touch_ok[key] = now
             return
 
         # Ошибка: heartbeat в интервале
@@ -543,11 +692,18 @@ class ModbusLine(threading.Thread):
 
         # «текущие» при ошибке
         state.update(
-            self.name_, nd.unit_id, nd.object, p.name,
+            self.name_,
+            nd.unit_id,
+            nd.object,
+            p.name,
             topic_like if topic_like.startswith("/") else f"{getattr(self.mqtt, 'base', '/devices')}/{topic_like}",
-            p.register_type, self._normalize_addr(p),
-            None, code, message,
-            last_ok_ts or 0.0, last_attempt_ts or now
+            p.register_type,
+            self._normalize_addr(p),
+            None,
+            code,
+            message,
+            last_ok_ts or 0.0,
+            last_attempt_ts or now,
         )
 
     # ───────────────────────── маппинг ошибок ─────────────────────────────────

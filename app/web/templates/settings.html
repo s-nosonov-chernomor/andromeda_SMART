@@ -133,6 +133,51 @@
       </div>
     </div>
 
+    <!-- Backups -->
+    <div class="card" style="padding:12px">
+      <h3>Backups</h3>
+      <div class="grid cols-2">
+        <div>
+          <label class="label">backups.dir</label>
+          <input class="input" id="bk_dir" placeholder="./data/backups">
+        </div>
+        <div>
+          <label class="label">backups.keep</label>
+          <input class="input" id="bk_keep" type="number" min="0" step="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- Current -->
+    <div class="card" style="padding:12px">
+      <h3>Current</h3>
+      <div class="grid">
+        <label class="label" title="Как часто обновлять last_ok_ts без публикации (сек)">touch_read_every_s</label>
+        <input class="input" id="cur_touch" type="number" min="0" step="1">
+      </div>
+    </div>
+
+    <!-- Service / Andromeda -->
+    <div class="card" style="padding:12px">
+      <h3>Сервис</h3>
+      <div class="grid cols-2">
+        <div>
+          <label class="label">systemd unit</label>
+          <input class="input" id="svc_unit" placeholder="agent.service">
+        </div>
+        <div>
+          <label class="label">restart_cmd</label>
+          <input class="input" id="svc_restart" placeholder="">
+        </div>
+      </div>
+      <h3 style="margin-top:10px">Andromeda</h3>
+      <div class="grid">
+        <label class="label">restart_cmd</label>
+        <input class="input" id="andr_restart" placeholder="/usr/local/bin/restart-andromeda.sh">
+      </div>
+    </div>
+
+
 
     <!-- Debug -->
     <div class="card" style="padding:12px">
@@ -196,6 +241,9 @@
         <col style="width:8%"><!-- Параметр -->
         <col style="width:6%"><!-- Тип -->
         <col style="width:7%"><!-- Адрес -->
+        <col style="width:6%"><!-- Words -->
+        <col style="width:7%"><!-- DataType -->
+        <col style="width:7%"><!-- WordOrder -->
         <col style="width:6%"><!-- Scale -->
         <col style="width:6%"><!-- Mode -->
         <col style="width:10%"><!-- Publish -->
@@ -205,6 +253,9 @@
         <col style="width:13%"><!-- Err text -->
         <col style="width:8%"><!-- mqttROM -->
         <col style="width:10%"><!-- Действия -->
+        <col style="width:6%"><!-- Step -->
+        <col style="width:7%"><!-- Hysteresis -->
+
       </colgroup>
       <thead>
         <tr>
@@ -214,6 +265,9 @@
           <th>Параметр</th>
           <th>Тип</th>
           <th>Адрес</th>
+          <th>Words</th>
+          <th>DataType</th>
+          <th>WordOrder</th>
           <th>Scale</th>
           <th>Mode</th>
           <th>Publish</th>
@@ -222,6 +276,8 @@
           <th title="0 или 1">Err</th>
           <th>Err text</th>
           <th>mqttROM</th>
+          <th>Step</th>
+          <th>Hysteresis</th>
           <th class="right">Действия</th>
         </tr>
       </thead>
@@ -263,6 +319,18 @@
         <label class="label">Адрес</label>
         <input id="m_addr" type="number" step="1" class="input">
       </div>
+      <div>
+        <label class="label">Words</label>
+        <input id="m_words" type="number" step="1" min="1" class="input" value="1">
+      </div>
+      <div>
+        <label class="label">Data type</label>
+        <select id="m_dtype" class="select"></select>
+      </div>
+      <div>
+        <label class="label">Word order</label>
+        <select id="m_worder" class="select"></select>
+      </div>
 
       <div>
         <label class="label">Scale</label>
@@ -303,6 +371,15 @@
         <label class="label">mqttROM</label>
         <input id="m_mqttrom" class="input" placeholder="Имя для ПО «РОМ»">
       </div>
+      <div>
+        <label class="label">Step (дискретность)</label>
+        <input id="m_step" type="number" step="0.0001" class="input">
+      </div>
+      <div>
+        <label class="label">Hysteresis</label>
+        <input id="m_hyst" type="number" step="0.0001" class="input">
+      </div>
+
       <div></div><div></div>
     </div>
 
@@ -393,6 +470,20 @@
     const adr = g.addressing || {};
     qs('#addr_norm').checked = (adr.normalize !== false); // по умолчанию true
 
+    // backups
+    qs('#bk_dir').value  = (g.backups && g.backups.dir)  || './data/backups';
+    qs('#bk_keep').value = (g.backups && g.backups.keep) ?? 10;
+
+    // current
+    qs('#cur_touch').value = (g.current && g.current.touch_read_every_s) ?? 3;
+
+    // service
+    qs('#svc_unit').value    = (g.service && g.service.unit) || 'agent.service';
+    qs('#svc_restart').value = (g.service && g.service.restart_cmd) || '';
+
+    // andromeda
+    qs('#andr_restart').value = (g.andromeda && g.andromeda.restart_cmd) || '/usr/local/bin/restart-andromeda.sh';
+
 
   }
 
@@ -436,8 +527,21 @@
       },
       addressing: {
         normalize: qs('#addr_norm').checked
-      }
-
+      },
+      backups: {
+        dir: qs('#bk_dir').value.trim(),
+        keep: +qs('#bk_keep').value
+      },
+      current: {
+        touch_read_every_s: +qs('#cur_touch').value
+      },
+      service: {
+        unit: qs('#svc_unit').value.trim(),
+        restart_cmd: qs('#svc_restart').value.trim()
+      },
+      andromeda: {
+        restart_cmd: qs('#andr_restart').value.trim()
+      },
 
     };
     await apiJson('/api/settings/general', {
@@ -643,6 +747,9 @@
         <td class="mono">${escHtml(p.name)}</td>
         <td class="mono">${escHtml(p.register_type)}</td>
         <td class="mono">${escHtml(p.address)}</td>
+        <td class="mono">${escHtml(p.words ?? 1)}</td>
+        <td class="mono">${escHtml(p.data_type || 'u16')}</td>
+        <td class="mono">${escHtml(p.word_order || 'AB')}</td>
         <td class="mono">${escHtml(p.scale ?? 1)}</td>
         <td class="mono">${escHtml(p.mode)}</td>
         <td class="wrap">${escHtml(pm)}</td>
@@ -651,6 +758,8 @@
         <td class="mono">${p.error_state==null? '' : escHtml(p.error_state)}</td>
         <td class="wrap">${escHtml(fmt(p.display_error_text))}</td>
         <td class="mono">${escHtml(fmt(p.mqttROM))}</td>
+        <td class="mono">${p.step==null? '' : escHtml(p.step)}</td>
+        <td class="mono">${p.hysteresis==null? '' : escHtml(p.hysteresis)}</td>
         <td class="right">
           <button class="btn btn-ghost btn-edit"
                   data-line="${escHtml(lineName)}"
@@ -664,6 +773,7 @@
         </td>
       </tr>`;
   }
+
 
   function renderParams(){
     const tbody = qs('#tbody-params');
@@ -711,6 +821,10 @@
     qs('#m_rtype').innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
     qs('#m_mode').innerHTML  = ENUMS.param_modes.map(x=> `<option>${x}</option>`).join('');
     qs('#m_pmode').innerHTML = ENUMS.publish_modes.map(x=> `<option>${x}</option>`).join('');
+
+    qs('#m_dtype').innerHTML  = (ENUMS.data_types||["u16","s16","u32","s32","f32"]).map(x=> `<option>${x}</option>`).join('');
+    qs('#m_worder').innerHTML = (ENUMS.word_orders||["AB","BA"]).map(x=> `<option>${x}</option>`).join('');
+
     // линии
     qs('#m_line2').innerHTML = LINES.map(x=> `<option>${escHtml(x.name)}</option>`).join('');
     // узлы по текущей линии
@@ -768,6 +882,9 @@
     qs('#m_name').value = p.name;
     qs('#m_rtype').value = p.register_type;
     qs('#m_addr').value  = p.address;
+    qs('#m_words').value  = p.words ?? 1;
+    qs('#m_dtype').value  = p.data_type || 'u16';
+    qs('#m_worder').value = p.word_order || 'AB';
     qs('#m_scale').value = p.scale ?? 1;
     qs('#m_mode').value  = p.mode;
     qs('#m_pmode').value = p.publish_mode || 'on_change';
@@ -776,6 +893,8 @@
     qs('#m_err').value   = (p.error_state==null? '' : String(p.error_state));
     qs('#m_errtxt').value = p.display_error_text || '';
     qs('#m_mqttrom').value = p.mqttROM || '';
+    qs('#m_step').value = (p.step==null ? '' : p.step);
+    qs('#m_hyst').value = (p.hysteresis==null ? '' : p.hysteresis);
     openModal('edit');
   }
 
@@ -791,6 +910,9 @@
       name: qs('#m_name').value.trim(),
       register_type: qs('#m_rtype').value,
       address: +qs('#m_addr').value,
+      words: (+qs('#m_words').value || 1),
+      data_type: qs('#m_dtype').value,
+      word_order: qs('#m_worder').value,
       scale: +qs('#m_scale').value || 1.0,
       mode: qs('#m_mode').value,
       publish_mode: qs('#m_pmode').value,
@@ -799,6 +921,8 @@
       error_state: (qs('#m_err').value===''? null : +qs('#m_err').value),
       display_error_text: qs('#m_errtxt').value.trim() || null,
       mqttROM: qs('#m_mqttrom').value.trim() || null
+      step: (qs('#m_step').value===''? null : +qs('#m_step').value),
+      hysteresis: (qs('#m_hyst').value===''? null : +qs('#m_hyst').value),
     };
 
     if(MODAL_MODE === 'add'){

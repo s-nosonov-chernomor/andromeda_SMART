@@ -1,12 +1,16 @@
 # app/core/validate_cfg.py
 from __future__ import annotations
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 ALLOWED_REGISTER_TYPES = {"coil", "discrete", "holding", "input"}
 ALLOWED_PARAM_MODES    = {"r", "rw"}
 ALLOWED_PUBLISH_MODES  = {"on_change", "interval", "on_change_and_interval"}
 
-def _as_int(v, name, min_=None, max_=None) -> int:
+# multi-register / analog helpers
+ALLOWED_DATA_TYPES   = {"u16", "s16", "u32", "s32", "f32"}
+ALLOWED_WORD_ORDERS  = {"AB", "BA"}  # порядок 16-битных слов для 32-битных типов
+
+def _as_int(v, name, min_: Optional[int] = None, max_: Optional[int] = None) -> int:
     try:
         iv = int(v)
     except Exception:
@@ -17,7 +21,7 @@ def _as_int(v, name, min_=None, max_=None) -> int:
         raise ValueError(f"{name}: должно быть ≤ {max_} (получено {iv})")
     return iv
 
-def _as_float(v, name, min_=None) -> float:
+def _as_float(v, name, min_: Optional[float] = None) -> float:
     try:
         fv = float(v)
     except Exception:
@@ -25,6 +29,16 @@ def _as_float(v, name, min_=None) -> float:
     if min_ is not None and fv < min_:
         raise ValueError(f"{name}: должно быть ≥ {min_} (получено {fv})")
     return fv
+
+def _as_bool(v, name) -> bool:
+    if isinstance(v, bool):
+        return v
+    # допускаем 'true'/'false'/1/0 из yaml
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str) and v.lower() in ("true", "false"):
+        return v.lower() == "true"
+    raise ValueError(f"{name}: должен быть true/false")
 
 def validate_cfg(cfg: Dict[str, Any]) -> None:
     """Бросает ValueError с понятным текстом, если конфиг некорректен."""
@@ -40,7 +54,7 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
         raise ValueError("mqtt.host: не должен быть пустым")
     _as_int(mqtt.get("port", 1883), "mqtt.port", 1, 65535)
     _as_int(mqtt.get("qos", 0), "mqtt.qos", 0, 2)
-    # retain / client_id допускаем любые «правдподобные» типы
+    # retain/client_id допускаем как есть
 
     # ─── db ───
     db = cfg.get("db", {})
@@ -54,14 +68,43 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     serial = cfg.get("serial", {})
     if serial and not isinstance(serial, dict):
         raise ValueError("serial: должен быть объектом")
-    if "echo" in serial and not isinstance(serial["echo"], bool):
-        raise ValueError("serial.echo: должен быть true/false")
+    if "echo" in serial:
+        _as_bool(serial["echo"], "serial.echo")
 
+    # ─── addressing ───
     adr = cfg.get("addressing", {})
     if adr and not isinstance(adr, dict):
-        raise ValueError("addressing: must be an object")
-    if "normalize" in adr and not isinstance(adr["normalize"], bool):
-        raise ValueError("addressing.normalize must be boolean")
+        raise ValueError("addressing: должен быть объектом")
+    if "normalize" in adr:
+        _as_bool(adr["normalize"], "addressing.normalize")
+
+    # ─── backups ───
+    bkp = cfg.get("backups", {})
+    if bkp:
+        if not isinstance(bkp, dict):
+            raise ValueError("backups: должен быть объектом")
+        if "dir" in bkp and not isinstance(bkp["dir"], str):
+            raise ValueError("backups.dir: должен быть строкой")
+        if "keep" in bkp:
+            _as_int(bkp["keep"], "backups.keep", 0)
+
+    # ─── service ───
+    svc = cfg.get("service", {})
+    if svc:
+        if not isinstance(svc, dict):
+            raise ValueError("service: должен быть объектом")
+        if "unit" in svc and not isinstance(svc["unit"], str):
+            raise ValueError("service.unit: должен быть строкой")
+        if "restart_cmd" in svc and not (svc["restart_cmd"] is None or isinstance(svc["restart_cmd"], str)):
+            raise ValueError("service.restart_cmd: должен быть строкой или null")
+
+    # ─── andromeda ───
+    andr = cfg.get("andromeda", {})
+    if andr:
+        if not isinstance(andr, dict):
+            raise ValueError("andromeda: должен быть объектом")
+        if "restart_cmd" in andr and not (andr["restart_cmd"] is None or isinstance(andr["restart_cmd"], str)):
+            raise ValueError("andromeda.restart_cmd: должен быть строкой или null")
 
     # ─── history ───
     hist = cfg.get("history", {})
@@ -70,6 +113,14 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     _as_int(hist.get("max_rows", 0), "history.max_rows", 0)
     _as_int(hist.get("ttl_days", 0), "history.ttl_days", 0)
     _as_int(hist.get("cleanup_every", 500), "history.cleanup_every", 1)
+
+    # ─── current ───
+    cur = cfg.get("current", {})
+    if cur:
+        if not isinstance(cur, dict):
+            raise ValueError("current: должен быть объектом")
+        if "touch_read_every_s" in cur:
+            _as_int(cur["touch_read_every_s"], "current.touch_read_every_s", 0)
 
     # ─── polling ───
     pol = cfg.get("polling", {})
@@ -86,6 +137,8 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if br:
         if not isinstance(br, dict):
             raise ValueError("polling.batch_read: должен быть объектом")
+        if "enabled" in br:
+            _as_bool(br["enabled"], "polling.batch_read.enabled")
         _as_int(br.get("max_bits", 1), "polling.batch_read.max_bits", 1)
         _as_int(br.get("max_registers", 1), "polling.batch_read.max_registers", 1)
 
@@ -94,8 +147,10 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if not isinstance(dbg, dict):
         raise ValueError("debug: должен быть объектом")
     _as_int(dbg.get("summary_every_s", 0), "debug.summary_every_s", 0)
-
-
+    if "enabled" in dbg:
+        _as_bool(dbg["enabled"], "debug.enabled")
+    if "log_reads" in dbg:
+        _as_bool(dbg["log_reads"], "debug.log_reads")
 
     # ─── lines/nodes/params ───
     lines = cfg.get("lines", [])
@@ -115,13 +170,17 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
         seen_line_names.add(name)
 
         # базовые поля линии
-        str(ln.get("device", ""))  # пустое возможно, заполняете потом через UI
+        str(ln.get("device", ""))  # может быть пусто, заполняется позже через UI
         _as_int(ln.get("baudrate", 9600), f"lines[{name}].baudrate", 1)
         _as_float(ln.get("timeout", 0.1), f"lines[{name}].timeout", 0.0)
         if "parity" in ln and ln["parity"] not in (None, "N", "E", "O"):
             raise ValueError(f"lines[{name}].parity: допустимо N/E/O")
         if "stopbits" in ln:
             _as_int(ln.get("stopbits", 1), f"lines[{name}].stopbits", 1, 2)
+        if "port_retry_backoff_s" in ln:
+            _as_int(ln.get("port_retry_backoff_s", 0), f"lines[{name}].port_retry_backoff_s", 0)
+        if "rs485_rts_toggle" in ln:
+            _as_bool(ln["rs485_rts_toggle"], f"lines[{name}].rs485_rts_toggle")
 
         nodes = ln.get("nodes", [])
         if not isinstance(nodes, list):
@@ -135,12 +194,9 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
             obj = str(nd.get("object", "")).strip()
             if not obj:
                 raise ValueError(f"lines[{name}].nodes[unit {unit_id}].object: обязателен")
-            if unit_id in seen_units:
-                # допускаем одинаковый unit_id, если это сознательно — убери проверку.
-                pass
+            # допускаем повтор unit_id на одной линии при осознанной конфигурации
             seen_units.add(unit_id)
 
-            # дополнительный номер объекта (если задан)
             if "num_object" in nd and nd["num_object"] is not None:
                 _as_int(nd["num_object"], f"lines[{name}].nodes[unit {unit_id}].num_object", 0)
 
@@ -160,20 +216,22 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
                     raise ValueError(f"параметр '{pname}' (line '{name}', unit {unit_id}) дублируется")
                 seen_param_names.add(pname)
 
-                rt = str(p.get("register_type","")).strip()
+                rt = str(p.get("register_type", "")).strip()
                 if rt not in ALLOWED_REGISTER_TYPES:
                     raise ValueError(f"{name}/{unit_id}/{pname}: register_type должен быть {ALLOWED_REGISTER_TYPES}")
                 _as_int(p.get("address", 0), f"{name}/{unit_id}/{pname}: address", 0)
                 _as_float(p.get("scale", 1.0), f"{name}/{unit_id}/{pname}: scale", 0.000001)
-                md = str(p.get("mode","r")).strip()
+
+                md = str(p.get("mode", "r")).strip()
                 if md not in ALLOWED_PARAM_MODES:
                     raise ValueError(f"{name}/{unit_id}/{pname}: mode должен быть {ALLOWED_PARAM_MODES}")
-                pm = str(p.get("publish_mode","on_change")).strip()
+
+                pm = str(p.get("publish_mode", "on_change")).strip()
                 if pm not in ALLOWED_PUBLISH_MODES:
                     raise ValueError(f"{name}/{unit_id}/{pname}: publish_mode должен быть {ALLOWED_PUBLISH_MODES}")
                 _as_int(p.get("publish_interval_ms", 0), f"{name}/{unit_id}/{pname}: publish_interval_ms", 0)
 
-                # новые поля:
+                # error/mqttROM/text — как были
                 if "error_state" in p and p["error_state"] is not None:
                     _as_int(p["error_state"], f"{name}/{unit_id}/{pname}: error_state", 0, 1)
                 if "display_error_text" in p and p["display_error_text"] is not None:
@@ -182,3 +240,35 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
                 if "mqttROM" in p and p["mqttROM"] is not None:
                     if not isinstance(p["mqttROM"], str):
                         raise ValueError(f"{name}/{unit_id}/{pname}: mqttROM должен быть строкой")
+
+                # ─── NEW: multi-register поля ───
+                words = int(p.get("words", 1) or 1)
+                if words < 1:
+                    raise ValueError(f"{name}/{unit_id}/{pname}: words должно быть ≥ 1")
+                dtype = str(p.get("data_type", "u16") or "u16").strip()
+                if dtype not in ALLOWED_DATA_TYPES:
+                    raise ValueError(f"{name}/{unit_id}/{pname}: data_type должен быть {ALLOWED_DATA_TYPES}")
+                worder = str(p.get("word_order", "AB") or "AB").strip()
+                if words == 1:
+                    # для 16-битных значений порядок слов не влияет; но если задан — ограничим
+                    if worder not in ALLOWED_WORD_ORDERS:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order должен быть {ALLOWED_WORD_ORDERS}")
+                else:
+                    # сейчас поддерживаем только 2-словные типы (32 бита)
+                    if words != 2:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: words={words} не поддерживается (ожидалось 1 или 2)")
+                    if worder not in ALLOWED_WORD_ORDERS:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order должен быть {ALLOWED_WORD_ORDERS}")
+                    if dtype in {"u16", "s16"}:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: data_type={dtype} конфликтует с words=2")
+                    # для u32/s32/f32 words=2 — ок
+
+                # для coil/discrete разрешим только words=1
+                if rt in {"coil", "discrete"} and words != 1:
+                    raise ValueError(f"{name}/{unit_id}/{pname}: для {rt} допустимы только words=1")
+
+                # ─── NEW: аналоговые пороги ───
+                if "step" in p and p["step"] is not None:
+                    _as_float(p["step"], f"{name}/{unit_id}/{pname}: step", 0.0)
+                if "hysteresis" in p and p["hysteresis"] is not None:
+                    _as_float(p["hysteresis"], f"{name}/{unit_id}/{pname}: hysteresis", 0.0)

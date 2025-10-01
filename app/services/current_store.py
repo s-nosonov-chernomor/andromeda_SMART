@@ -84,6 +84,7 @@ class CurrentStore:
         sc = (md.get("status_code", {}) or {})
         code = int(sc.get("code", 0))
         message = str(sc.get("message", "OK"))
+
         trigger = md.get("trigger") or None
         silent_for_s = md.get("silent_for_s", None)
         try:
@@ -123,6 +124,26 @@ class CurrentStore:
             elif silent_for_s is not None:
                 st.last_ok_ts = ts - timedelta(seconds=int(silent_for_s))
             # если silent_for_s нет — оставляем как было
+
+    # вызывать из линии при УСПЕШНОМ чтении, если публикации нет/ещё рано
+    def touch_read(self, ctx: Dict[str, Any], ts: datetime) -> None:
+        line = str(ctx.get("line", ""))
+        unit = int(ctx.get("unit_id", 0))
+        obj  = str(ctx.get("object", ""))
+        name = str(ctx.get("param", ""))
+        rtype = str(ctx.get("register_type", ""))
+        addr  = int(ctx.get("address", 0))
+        key: Key = (line, unit, obj, name)
+        with self._lock:
+            st = self._items.get(key)
+            if not st:
+                st = ParamState(object=obj, param=name, line=line, unit_id=unit,
+                                register_type=rtype, address=addr)
+                self._items[key] = st
+            st.last_ok_ts = ts
+            if rtype: st.register_type = rtype
+            if addr:  st.address = addr
+
 
     def list(self) -> List[Dict[str, Any]]:
         now = datetime.now(timezone.utc)

@@ -100,10 +100,16 @@ class ParamDTO(BaseModel):
     publish_mode: Optional[str] = "on_change"
     publish_interval_ms: Optional[int] = 0
     topic: Optional[str] = None
-    # новые поля
+    # новые поля (уже были)
     error_state: Optional[Any] = None
     display_error_text: Optional[str] = None
     mqttROM: Optional[str] = None
+    step: Optional[float] = None
+    hysteresis: Optional[float] = None
+    # новые для multi-register
+    words: Optional[int] = 1
+    data_type: Optional[str] = "u16"       # u16|s16|u32|s32|f32
+    word_order: Optional[str] = "AB"       # AB|BA
 
 class AddParamDTO(BaseModel):
     line: str
@@ -146,7 +152,10 @@ def get_enums():
         "param_modes": ["r", "rw"],
         "publish_modes": ["on_change", "interval", "on_change_and_interval"],
         "parity": ["N", "E", "O"],
-        "stopbits": [1, 2]
+        "stopbits": [1, 2],
+        # новые enum-ы для UI параметров
+        "data_types": ["u16", "s16", "u32", "s32", "f32"],
+        "word_orders": ["AB", "BA"],
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,35 +165,44 @@ def get_enums():
 @router.get("/general")
 def get_general():
     cfg = _cfg()
+    # отдаем всё, что сейчас есть в YAML (с дефолтами где нужно)
     return {
         "mqtt": cfg.get("mqtt", {}),
-        "db": cfg.get("db", {}),               # ← добавили БД
-        "polling": cfg.get("polling", {}),
+        "db": cfg.get("db", {"url": "sqlite:///./data/data.db"}),
         "history": cfg.get("history", {}),
         "debug": cfg.get("debug", {}),
-        "serial": cfg.get("serial", {}),
+        "serial": cfg.get("serial", {"echo": False}),
         "addressing": cfg.get("addressing", {"normalize": True}),
+        "backups": cfg.get("backups", {"dir": "./data/backups", "keep": 10}),
+        "service": cfg.get("service", {"unit": "agent.service", "restart_cmd": ""}),
+        "andromeda": cfg.get("andromeda", {"restart_cmd": "/usr/local/bin/restart-andromeda.sh"}),
+        "current": cfg.get("current", {"touch_read_every_s": 3}),
+        "polling": cfg.get("polling", {}),
     }
 
 @router.put("/general")
 def put_general(body: Dict[str, Any]):
-    for k in ("mqtt", "db", "polling", "history", "debug", "serial"):
+    # требуем ключевые секции
+    for k in ("mqtt", "db", "polling", "history", "debug", "serial", "addressing", "backups", "service", "andromeda", "current"):
         if k not in body:
             raise HTTPException(400, f"Missing section in body: {k}")
 
     cfg = _cfg()
-    cfg["mqtt"] = body["mqtt"]
+    cfg["mqtt"] = body["mqtt"] or {}
     cfg["db"] = body["db"] or {"url": "sqlite:///./data/data.db"}
-    cfg["polling"] = body["polling"]
-    cfg["history"] = body["history"]
-    cfg["debug"] = body["debug"]
+    cfg["polling"] = body["polling"] or {}
+    cfg["history"] = body["history"] or {}
+    cfg["debug"] = body["debug"] or {}
     cfg["serial"] = body["serial"] or {"echo": False}
-    cfg["addressing"] = {
-        "normalize": bool((body.get("addressing") or {}).get("normalize", True))  # ← ДОБАВЬ ЭТО
-    }
+    cfg["addressing"] = {"normalize": bool((body.get("addressing") or {}).get("normalize", True))}
+    cfg["backups"] = body["backups"] or {"dir": "./data/backups", "keep": 10}
+    cfg["service"] = body["service"] or {"unit": "agent.service", "restart_cmd": ""}
+    cfg["andromeda"] = body["andromeda"] or {"restart_cmd": "/usr/local/bin/restart-andromeda.sh"}
+    cfg["current"] = body["current"] or {"touch_read_every_s": 3}
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ЛИНИИ целиком (редактирование портов/скоростей и т.п.)
@@ -475,28 +493,28 @@ def export_params_xlsx():
     ws.title = "params"
 
     headers = [
-        "Линия","Unit","Объект","Номер объекта",
-        "Параметр","Тип","Адрес","Scale","Mode",
-        "Publish","Interval, ms","Topic",
-        "error_state","display_error_text","mqttROM"
+        "Линия","Unit","Параметр","Тип","Адрес",
+        "Words","DataType","WordOrder",
+        "Scale","Mode","Publish","Interval, ms","Topic",
+        "error_state","display_error_text","mqttROM",
+        "Step","Hysteresis",
     ]
     ws.append(headers)
 
-    for ln in cfg.get("lines", []):
+    for ln in cfg.get("lines", []) or []:
         line_name = ln.get("name","")
-        for nd in ln.get("nodes", []):
+        for nd in ln.get("nodes", []) or []:
             unit = nd.get("unit_id", "")
-            obj  = nd.get("object", "")
-            numo = nd.get("num_object", "")
-            for p in nd.get("params", []):
+            for p in nd.get("params", []) or []:
                 ws.append([
                     line_name,
                     unit,
-                    obj,
-                    numo,
                     p.get("name",""),
                     p.get("register_type",""),
                     p.get("address",""),
+                    p.get("words", 1),
+                    p.get("data_type","u16"),
+                    p.get("word_order","AB"),
                     p.get("scale", 1.0),
                     p.get("mode","r"),
                     p.get("publish_mode","on_change"),
@@ -505,11 +523,12 @@ def export_params_xlsx():
                     p.get("error_state", ""),
                     p.get("display_error_text", "") or "",
                     p.get("mqttROM", "") or "",
+                    p.get("step", None),
+                    p.get("hysteresis", None),
                 ])
 
     buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    wb.save(buf); buf.seek(0)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -528,7 +547,7 @@ async def import_params_xlsx(file: UploadFile = File(...)):
     headers_row = [str(c.value or "").strip() for c in ws[1]]
     idx = {name: i for i, name in enumerate(headers_row)}
 
-    required = ["Линия","Unit","Объект","Параметр","Тип","Адрес","Scale","Mode","Publish","Interval, ms","Topic"]
+    required = ["Линия","Unit","Параметр","Тип","Адрес"]
     missing = [h for h in required if h not in idx]
     if missing:
         raise HTTPException(400, f"В файле отсутствуют колонки: {', '.join(missing)}")
@@ -541,91 +560,103 @@ async def import_params_xlsx(file: UploadFile = File(...)):
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not any(row):
             continue
-        line_name = str(row[idx["Линия"]] or "").strip()
+
+        def cv(key, cast=None, default=None):
+            if key not in idx:
+                return default
+            v = row[idx[key]]
+            if v in (None, ""):
+                return default
+            if cast is None:
+                return v
+            try:
+                return cast(v)
+            except Exception:
+                return default
+
+        line_name = str(cv("Линия", str, "")).strip()
         if not line_name:
             continue
-        unit_id = int(row[idx["Unit"]] or 0)
-        object_ = str(row[idx["Объект"]] or "").strip()
-        name    = str(row[idx["Параметр"]] or "").strip()
-        if not (object_ and name and unit_id):
+        unit_id = cv("Unit", int, 0)
+        name    = str(cv("Параметр", str, "")).strip()
+        reg_type = str(cv("Тип", str, "")).strip()
+        address  = cv("Адрес", int, None)
+
+        if not (unit_id and name and reg_type and address is not None):
             continue
 
-        reg_type = str(row[idx["Тип"]] or "").strip()
-        address  = int(row[idx["Адрес"]] or 0)
-        scale    = float(row[idx["Scale"]] or 1.0)
-        mode     = str(row[idx["Mode"]] or "r").strip()
-        pmode    = str(row[idx["Publish"]] or "on_change").strip()
-        pint     = int(row[idx["Interval, ms"]] or 0)
-        topic    = str(row[idx["Topic"]] or "").strip() or None
+        words = cv("Words", int, 1)
+        data_type = str(cv("DataType", str, "u16")).strip() or "u16"
+        word_order = str(cv("WordOrder", str, "AB")).strip() or "AB"
 
-        num_obj  = None
-        if "Номер объекта" in idx:
-            v = row[idx["Номер объекта"]]
-            if v not in (None, ""):
-                num_obj = int(v)
+        scale    = cv("Scale", float, 1.0)
+        mode     = str(cv("Mode", str, "r")).strip()
+        pmode    = str(cv("Publish", str, "on_change")).strip()
+        pint     = cv("Interval, ms", int, 0)
+        topic    = str(cv("Topic", str, "")).strip() or None
 
-        error_state = None
-        if "error_state" in idx:
-            v = row[idx["error_state"]]
-            if v not in (None, ""):
-                error_state = int(v)
+        error_state = cv("error_state", int, None)
+        display_error_text = str(cv("display_error_text", str, "") or "").strip() or None
+        mqttROM = str(cv("mqttROM", str, "") or "").strip() or None
 
-        display_error_text = None
-        if "display_error_text" in idx:
-            v = row[idx["display_error_text"]]
-            if v not in (None, ""):
-                display_error_text = str(v)
+        step = cv("Step", float, None)
+        hysteresis = cv("Hysteresis", float, None)
 
-        mqttROM = None
-        if "mqttROM" in idx:
-            v = row[idx["mqttROM"]]
-            if v not in (None, ""):
-                mqttROM = str(v)
-
+        # --- соберём структуру cfg ---
         line = new_lines.get(line_name)
         if not line:
-            # сохраняем существующие портовые поля, если линия уже есть в cfg
             existing = next((ln for ln in cfg.get("lines", []) if ln.get("name")==line_name), None)
             if existing:
-                line = {k: existing.get(k) for k in ("name","device","baudrate","timeout","parity","stopbits","port_retry_backoff_s","nodes")}
+                line = {k: existing.get(k) for k in ("name","device","baudrate","timeout","parity","stopbits","port_retry_backoff_s","rs485_rts_toggle","nodes")}
                 line["name"] = line_name
                 line["nodes"] = []
             else:
-                line = {"name": line_name, "device": "", "baudrate": 9600, "timeout": 0.1, "parity": "N", "stopbits": 1, "nodes": []}
+                line = {"name": line_name, "device": "", "baudrate": 9600, "timeout": 0.1, "parity": "N", "stopbits": 1, "port_retry_backoff_s": 5, "nodes": []}
             new_lines[line_name] = line
 
-        key = (line_name, unit_id, object_)
+        key = (line_name, unit_id)
         node = nodes_by_key.get(key)
         if not node:
-            node = {"unit_id": unit_id, "object": object_, "params": []}
-            if num_obj is not None:
-                node["num_object"] = num_obj
+            # объект сюда из XLSX не тащим — идентификация по Unit
+            node = {"unit_id": int(unit_id), "params": []}
+            # если линия уже была — сохраним существующий object (если есть)
+            exist_ln = next((ln for ln in (cfg.get("lines", []) or []) if ln.get("name")==line_name), None)
+            exist_nd = None
+            if exist_ln:
+                exist_nd = next((nd for nd in (exist_ln.get("nodes", []) or []) if int(nd.get("unit_id", -1)) == int(unit_id)), None)
+            if exist_nd:
+                node["object"] = exist_nd.get("object", f"unit{unit_id}")
+                if "num_object" in exist_nd:
+                    node["num_object"] = exist_nd.get("num_object")
+            else:
+                node["object"] = f"unit{unit_id}"
             nodes_by_key[key] = node
             line["nodes"].append(node)
 
         param = {
             "name": name,
             "register_type": reg_type,
-            "address": address,
-            "scale": scale,
+            "address": int(address),
+            "words": int(words or 1),
+            "data_type": data_type,
+            "word_order": word_order,
+            "scale": float(scale or 1.0),
             "mode": mode,
             "publish_mode": pmode,
-            "publish_interval_ms": pint,
+            "publish_interval_ms": int(pint or 0),
             "topic": topic
         }
-        if error_state is not None:
-            param["error_state"] = error_state
-        if display_error_text is not None:
-            param["display_error_text"] = display_error_text
-        if mqttROM is not None:
-            param["mqttROM"] = mqttROM
+        if error_state is not None: param["error_state"] = error_state
+        if display_error_text is not None: param["display_error_text"] = display_error_text
+        if mqttROM is not None: param["mqttROM"] = mqttROM
+        if step is not None: param["step"] = step
+        if hysteresis is not None: param["hysteresis"] = hysteresis
 
         node["params"].append(param)
         total_params += 1
 
     cfg["lines"] = list(new_lines.values())
     backup = _write_cfg(cfg)
-
     try:
         hot_reload_lines(cfg)
     except Exception as e:
