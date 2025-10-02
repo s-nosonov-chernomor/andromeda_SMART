@@ -1,0 +1,27 @@
+flows:
+- id: a6c3a6fb-3d8a-4088-a4ca-978d264a83e2
+  name: Тест1
+  type: telegram
+  enabled: true
+  options:
+    telegram:
+      bot_token: 5459732327:AAHSXiZcWPPTOa4w5C42LAWQM4LK_wQMGHA
+      chat_id: '580097120'
+  params:
+  - key: line1|79|МощностьК1
+    alias: мощность чайника
+    path: ЖК Крылья / Дом 1
+    nominal: 5000
+    tolerance: 100
+    ok_text: в пределах номинала
+    alarm_text: Вышел за пределы
+  events:
+    group_window_s: 10
+    selected:
+    - line1|79|МощностьК1
+    exceptions: []
+  intervals:
+    group_window_s: 15
+    selected:
+    - line1|79|МощностьК1
+    exceptions: []

@@ -100,10 +100,6 @@ class ParamDTO(BaseModel):
     publish_mode: Optional[str] = "on_change"
     publish_interval_ms: Optional[int] = 0
     topic: Optional[str] = None
-    # новые поля (уже были)
-    error_state: Optional[Any] = None
-    display_error_text: Optional[str] = None
-    mqttROM: Optional[str] = None
     step: Optional[float] = None
     hysteresis: Optional[float] = None
     # новые для multi-register
@@ -497,7 +493,6 @@ def export_params_xlsx():
         "Линия","Unit","Параметр","Тип","Адрес",
         "Words","DataType","WordOrder",
         "Scale","Mode","Publish","Interval, ms","Topic",
-        "error_state","display_error_text","mqttROM",
         "Step","Hysteresis",
     ]
     ws.append(headers)
@@ -521,9 +516,6 @@ def export_params_xlsx():
                     p.get("publish_mode","on_change"),
                     p.get("publish_interval_ms", 0),
                     p.get("topic") or "",
-                    p.get("error_state", ""),
-                    p.get("display_error_text", "") or "",
-                    p.get("mqttROM", "") or "",
                     p.get("step", None),
                     p.get("hysteresis", None),
                 ])
@@ -596,10 +588,6 @@ async def import_params_xlsx(file: UploadFile = File(...)):
         pint     = cv("Interval, ms", int, 0)
         topic    = str(cv("Topic", str, "")).strip() or None
 
-        error_state = cv("error_state", int, None)
-        display_error_text = str(cv("display_error_text", str, "") or "").strip() or None
-        mqttROM = str(cv("mqttROM", str, "") or "").strip() or None
-
         step = cv("Step", float, None)
         hysteresis = cv("Hysteresis", float, None)
 
@@ -647,9 +635,6 @@ async def import_params_xlsx(file: UploadFile = File(...)):
             "publish_interval_ms": int(pint or 0),
             "topic": topic
         }
-        if error_state is not None: param["error_state"] = error_state
-        if display_error_text is not None: param["display_error_text"] = display_error_text
-        if mqttROM is not None: param["mqttROM"] = mqttROM
         if step is not None: param["step"] = step
         if hysteresis is not None: param["hysteresis"] = hysteresis
 

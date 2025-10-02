@@ -249,10 +249,6 @@
         <col style="width:10%"><!-- Publish -->
         <col style="width:7%"><!-- Interval -->
         <col style="width:11%"><!-- Topic -->
-        <col style="width:5%"><!-- Err state -->
-        <col style="width:13%"><!-- Err text -->
-        <col style="width:8%"><!-- mqttROM -->
-
         <col style="width:6%"><!-- Step -->
         <col style="width:7%"><!-- Hysteresis -->
         <col style="width:10%"><!-- Действия -->
@@ -274,9 +270,6 @@
           <th>Publish</th>
           <th>Interval, ms</th>
           <th>Topic</th>
-          <th title="0 или 1">Err</th>
-          <th>Err text</th>
-          <th>mqttROM</th>
           <th>Step</th>
           <th>Hysteresis</th>
           <th class="right">Действия</th>
@@ -355,23 +348,6 @@
         <input id="m_topic" class="input" placeholder="/abs/or/relative/topic" title="Если не задан — строится автоматически от base_topic/line/object/param">
       </div>
 
-      <div>
-        <label class="label" title="0/1 — состояние для аварии">error_state</label>
-        <select id="m_err" class="select">
-          <option value="">—</option>
-          <option value="0">0</option>
-          <option value="1">1</option>
-        </select>
-      </div>
-      <div class="grid" style="grid-column: span 2;">
-        <label class="label">display_error_text</label>
-        <input id="m_errtxt" class="input" placeholder="Например: Авария клапана">
-      </div>
-
-      <div>
-        <label class="label">mqttROM</label>
-        <input id="m_mqttrom" class="input" placeholder="Имя для ПО «РОМ»" title="Опциональное имя параметра для интеграции с ПО «РОМ»">
-      </div>
       <div>
         <label class="label">Step (дискретность)</label>
         <input id="m_step" type="number" step="0.0001" class="input" title="Шаг изменения для числовых полей (UI)">
@@ -766,9 +742,6 @@
         <td class="wrap">${escHtml(pm)}</td>
         <td class="mono">${escHtml(p.publish_interval_ms ?? 0)}</td>
         <td class="wrap">${escHtml(fmt(p.topic))}</td>
-        <td class="mono">${p.error_state==null? '' : escHtml(p.error_state)}</td>
-        <td class="wrap">${escHtml(fmt(p.display_error_text))}</td>
-        <td class="mono">${escHtml(fmt(p.mqttROM))}</td>
         <td class="mono">${p.step==null? '' : escHtml(p.step)}</td>
         <td class="mono">${p.hysteresis==null? '' : escHtml(p.hysteresis)}</td>
         <td class="right">
@@ -796,7 +769,7 @@
       if(fl && ln.name !== fl) continue;
       for(const nd of (ln.nodes || [])){
         for(const p of (nd.params || [])){
-          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''} ${p.display_error_text||''} ${p.mqttROM||''}`.toLowerCase();
+          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''}`.toLowerCase();
           if(q && !hay.includes(q)) continue;
           rows.push(rowHtml(ln.name, nd.unit_id, nd.object, p));
         }
@@ -823,9 +796,7 @@
     qs('#m_scale').value='1';
     qs('#m_pint').value='0';
     qs('#m_topic').value='';
-    qs('#m_err').value='';
-    qs('#m_errtxt').value='';
-    qs('#m_mqttrom').value='';
+
   }
 
   function fillEnumsInModal(){
@@ -901,9 +872,6 @@
     qs('#m_pmode').value = p.publish_mode || 'on_change';
     qs('#m_pint').value  = p.publish_interval_ms ?? 0;
     qs('#m_topic').value = p.topic || '';
-    qs('#m_err').value   = (p.error_state==null? '' : String(p.error_state));
-    qs('#m_errtxt').value = p.display_error_text || '';
-    qs('#m_mqttrom').value = p.mqttROM || '';
     qs('#m_step').value = (p.step==null ? '' : p.step);
     qs('#m_hyst').value = (p.hysteresis==null ? '' : p.hysteresis);
     openModal('edit');
@@ -929,9 +897,6 @@
       publish_mode: qs('#m_pmode').value,
       publish_interval_ms: +qs('#m_pint').value || 0,
       topic: qs('#m_topic').value.trim() || null,
-      error_state: (qs('#m_err').value===''? null : +qs('#m_err').value),
-      display_error_text: qs('#m_errtxt').value.trim() || null,
-      mqttROM: qs('#m_mqttrom').value.trim() || null,
       step: (qs('#m_step').value===''? null : +qs('#m_step').value),
       hysteresis: (qs('#m_hyst').value===''? null : +qs('#m_hyst').value),
     };

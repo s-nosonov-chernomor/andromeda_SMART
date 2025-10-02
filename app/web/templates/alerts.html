@@ -1,0 +1,625 @@
+{% extends "base.html" %}
+{% block title %}Оповещения{% endblock %}
+
+{% block nav_actions %}
+<button class="btn btn-ghost" id="btn-alerts-reload">Перечитать</button>
+<button class="btn btn-primary" id="btn-alerts-save">Сохранить</button>
+{% endblock %}
+
+{% block content %}
+<style>
+  .flow-card .head { display:flex; align-items:center; gap:10px; }
+  .flow-card .head .grow { flex:1; }
+  .kv { display:grid; grid-template-columns: 220px 1fr; gap:10px 14px; }
+  @media (max-width: 920px){ .kv{ grid-template-columns: 1fr; } }
+  .hint { color: var(--muted); font-size: 12px; }
+  .subcard { border: 1px dashed var(--border); border-radius: 12px; padding: 12px; }
+  .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); }
+  .tag { display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface); margin: 4px 6px 0 0; }
+  .tag .x { cursor:pointer; opacity:.6; }
+  .table-mini{ width:100%; border-collapse: separate; border-spacing:0; }
+  .table-mini th, .table-mini td { padding:8px 10px; border-bottom:1px solid var(--border); }
+  .table-mini thead th { background:var(--surface-2); font-size:12px; color:var(--muted); text-align:left; }
+</style>
+
+<h2 style="margin:6px 0 14px;">Оповещения</h2>
+
+<div class="toolbar" style="justify-content: space-between;">
+  <div class="hint">Конфигурация хранится в <code class="mono">alerts.yaml</code>. Каждый поток отправляет сообщения независимо.</div>
+  <button class="btn btn-primary" id="btn-add-flow">Добавить поток</button>
+</div>
+
+<div id="flows"></div>
+
+<!-- ───────── Модалка: добавить/редактировать параметр потока ───────── -->
+<div class="modal-backdrop" id="paramModal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="paramTitle">
+    <header>
+      <h3 id="paramTitle">Параметр</h3>
+      <button class="btn btn-ghost" id="pmClose" aria-label="Закрыть">✕</button>
+    </header>
+
+    <div class="grid cols-2">
+      <div>
+        <label class="label" title="Выберите параметр из основного YAML (Линия / Unit / Объект / Имя)">Имя (из конфигурации)</label>
+        <select id="pmKey" class="select"></select>
+        <div class="hint">Это привязка к реальному параметру, по которому слушаем MQTT.</div>
+      </div>
+      <div>
+        <label class="label" title="Как будет называться параметр в тексте сообщения">Имя в сообщении</label>
+        <input id="pmAlias" class="input" placeholder="Например: Уровень раствора">
+      </div>
+
+      <div>
+        <label class="label" title="Иерархия локаций через / (любая вложенность)">Расположение</label>
+        <input id="pmPath" class="input" placeholder="ЖК Крылья / Корпус 1 / Квартира 3">
+        <div class="hint">Группируем сообщения по этой структуре.</div>
+      </div>
+      <div>
+        <label class="label" title="Номинал/норма. Для булевых — 0 или 1. Для аналоговых — число.">Номинальное значение</label>
+        <input id="pmNominal" type="number" step="0.0001" class="input" placeholder="например, 5000">
+        <div class="hint">Булево: 0/1. Аналог: число.</div>
+      </div>
+
+      <div>
+        <label class="label" title="Погрешность (игнорируется для булевых)">Погрешность измерения</label>
+        <input id="pmTol" type="number" step="0.0001" class="input" placeholder="например, 60">
+        <div class="hint">Если |значение − номинал| ≤ погрешности → считаем нормой (для аналоговых).</div>
+      </div>
+      <div>
+        <label class="label" title="Текст состояния, когда параметр в норме">Текст «Норма»</label>
+        <input id="pmOkText" class="input" placeholder="Например: в норме">
+      </div>
+
+      <div>
+        <label class="label" title="Текст состояния, когда параметр в аварии">Текст «Авария»</label>
+        <input id="pmAlarmText" class="input" placeholder="Например: ниже нормы">
+        <div class="hint">Для аналоговых к сообщению добавится «(XX%)» — относительное отклонение.</div>
+      </div>
+    </div>
+
+    <div class="toolbar" style="justify-content:flex-end; margin-top:12px;">
+      <button class="btn btn-ghost" id="pmCancel">Отмена</button>
+      <button class="btn btn-primary" id="pmSave">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── Модалка: выбор параметров для разделов (события/интервалы) ───────── -->
+<div class="modal-backdrop" id="pickModal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+    <header>
+      <h3 id="pickTitle">Выбор параметров</h3>
+      <button class="btn btn-ghost" id="pickClose" aria-label="Закрыть">✕</button>
+    </header>
+
+    <div id="pickList" class="grid" style="max-height:52vh; overflow:auto;"></div>
+
+    <div class="toolbar" style="justify-content:flex-end; margin-top:12px;">
+      <button class="btn btn-ghost" id="pickCancel">Отмена</button>
+      <button class="btn btn-primary" id="pickApply">Применить</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" style="display:none;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const qsa = s => [...document.querySelectorAll(s)];
+  const flowsEl = $('#flows');
+  const toast = $('#toast');
+
+  function showToast(msg){ toast.textContent = msg; toast.style.display='block'; setTimeout(()=> toast.style.display='none', 2500); }
+  async function apiJson(url, opts={}){ const r = await fetch(url, opts); if(!r.ok) throw new Error(await r.text().catch(()=> r.statusText)); const ct=r.headers.get('content-type')||''; return ct.includes('application/json')? r.json() : r.text(); }
+
+  let ENUMS = { flow_types: [] };
+  let KNOWN = []; // [{line,unit_id,object,name}]
+  let CFG   = { flows: [] };
+
+  // ───────── helpers: keys, lookups ─────────
+  const keyOf = (p)=> `${p.line}|${p.unit_id}|${p.name}`;
+  const labelOf = (p)=> `${p.line} / ${p.unit_id} / ${p.object || '-'} / ${p.name}`;
+
+  function ensureDefaultsFlow(f){
+    f.id = f.id || crypto.randomUUID();
+    f.name = f.name || 'Поток';
+    f.type = f.type || 'telegram';
+    f.enabled = (f.enabled !== false);
+    f.options = f.options || {};
+    if(f.type === 'telegram'){ f.options.telegram = f.options.telegram || { bot_token:'', chat_id:'' }; }
+    if(f.type === 'ronet'){    f.options.ronet    = f.options.ronet    || { endpoint_url:'' }; }
+    f.params = (f.params || []).map(p => ({
+      key: p.key || '',
+      alias: p.alias || '',
+      path: p.path || '',
+      nominal: (p.nominal ?? null),
+      tolerance: (p.tolerance ?? null),
+      ok_text: p.ok_text || 'в норме',
+      alarm_text: p.alarm_text || 'авария',
+    }));
+    f.events = f.events || {};
+    f.events.group_window_s = parseInt(f.events.group_window_s || 10,10);
+    f.events.selected = Array.isArray(f.events.selected)? f.events.selected : [];
+    f.events.exceptions = Array.isArray(f.events.exceptions)? f.events.exceptions : []; // [{key,value}]
+
+    f.intervals = f.intervals || {};
+    f.intervals.group_window_s = parseInt(f.intervals.group_window_s || 60,10);
+    f.intervals.selected = Array.isArray(f.intervals.selected)? f.intervals.selected : [];
+    f.intervals.exceptions = Array.isArray(f.intervals.exceptions)? f.intervals.exceptions : [];
+
+    return f;
+  }
+
+  // ───────── render: flows ─────────
+  function render(){
+    flowsEl.innerHTML = '';
+    if(!Array.isArray(CFG.flows)) CFG.flows = [];
+    CFG.flows = CFG.flows.map(ensureDefaultsFlow);
+
+    CFG.flows.forEach((flow, idx) => {
+      const card = document.createElement('div');
+      card.className = 'card flow-card';
+      card.dataset.idx = idx;
+
+      // options body (type-specific)
+      const telegramBox = `
+        <div class="kv" data-opt="telegram" style="${flow.type==='telegram'?'':'display:none'}">
+          <div>
+            <label class="label" title="Токен бота, полученный у @BotFather">Telegram: bot_token</label>
+            <input class="input" data-bind="options.telegram.bot_token" placeholder="1234567:AAA...." value="${esc(flow.options.telegram?.bot_token || '')}">
+            <div class="hint">У бота должен быть доступ к выбранному чату.</div>
+          </div>
+          <div>
+            <label class="label" title="ID чата (группа/канал/личка), например -1001234567890">Telegram: chat_id</label>
+            <input class="input" data-bind="options.telegram.chat_id" placeholder="-100..." value="${esc(flow.options.telegram?.chat_id || '')}">
+            <div class="hint">Можно узнать через @RawDataBot или API.</div>
+          </div>
+        </div>`;
+
+      const ronetBox = `
+        <div class="kv" data-opt="ronet" style="${flow.type==='ronet'?'':'display:none'}">
+          <div>
+            <label class="label" title="Endpoint, куда отправлять оповещения">RO.NET: endpoint_url</label>
+            <input class="input" data-bind="options.ronet.endpoint_url" placeholder="https://host/path" value="${esc(flow.options.ronet?.endpoint_url || '')}">
+            <div class="hint">Формат и авторизация уточняются; пока одно поле.</div>
+          </div>
+        </div>`;
+
+      // params list
+      const paramsRows = flow.params.map((p,pi)=>`
+        <tr data-pi="${pi}">
+          <td class="mono">${esc(p.key)}</td>
+          <td>${esc(p.alias)}</td>
+          <td>${esc(p.path)}</td>
+          <td class="right">${p.nominal==null?'':esc(p.nominal)}</td>
+          <td class="right">${p.tolerance==null?'':esc(p.tolerance)}</td>
+          <td>${esc(p.ok_text)}</td>
+          <td>${esc(p.alarm_text)}</td>
+          <td class="right">
+            <button class="btn btn-ghost btn-edit-param">Ред.</button>
+            <button class="btn btn-danger btn-del-param">Удалить</button>
+          </td>
+        </tr>`).join('');
+
+      // selections as tags
+      const tags = (sel)=> sel.map(k=>{
+        const p = KNOWN.find(x=> keyOf(x)===k);
+        const lbl = p ? labelOf(p) : k;
+        return `<span class="tag" data-key="${esc(k)}">${esc(lbl)} <span class="x" title="убрать">×</span></span>`;
+      }).join('');
+
+      const eventsCard = `
+        <div class="subcard">
+          <div class="toolbar" style="justify-content:space-between;">
+            <strong>События</strong>
+            <div class="hint">Собираем публикации вида «event», группируем и отправляем одним сообщением.</div>
+          </div>
+          <div class="kv" style="margin-top:6px;">
+            <div>
+              <label class="label" title="Сколько секунд копить события перед отправкой">Время группировки, с</label>
+              <input class="input" type="number" min="0" step="1" data-bind="events.group_window_s" value="${Number(flow.events.group_window_s)||10}">
+            </div>
+            <div>
+              <label class="label" title="Какие параметры участвуют в разделе «События»">Список параметров</label>
+              <div>
+                <div class="chips" data-tags="events">${tags(flow.events.selected)}</div>
+                <button class="btn btn-ghost btn-pick" data-scope="events">Выбрать…</button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+              <strong>Исключения</strong>
+              <span class="hint">Если значение равно указанному — не отправляем.</span>
+              <button class="btn btn-ghost btn-add-exc" data-scope="events">Добавить</button>
+            </div>
+            ${exceptionsTable(flow.events.exceptions)}
+          </div>
+        </div>`;
+
+      const intervalsCard = `
+        <div class="subcard">
+          <div class="toolbar" style="justify-content:space-between;">
+            <strong>Интервальные оповещения</strong>
+            <div class="hint">Собираем публикации вида «interval» по выбранным параметрам.</div>
+          </div>
+          <div class="kv" style="margin-top:6px;">
+            <div>
+              <label class="label" title="Сколько секунд копить данные «interval» перед отправкой">Время группировки, с</label>
+              <input class="input" type="number" min="0" step="1" data-bind="intervals.group_window_s" value="${Number(flow.intervals.group_window_s)||60}">
+            </div>
+            <div>
+              <label class="label" title="Какие параметры участвуют в разделе «Интервалы»">Список параметров</label>
+              <div>
+                <div class="chips" data-tags="intervals">${tags(flow.intervals.selected)}</div>
+                <button class="btn btn-ghost btn-pick" data-scope="intervals">Выбрать…</button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+              <strong>Исключения</strong>
+              <span class="hint">Если значение равно указанному — не отправляем.</span>
+              <button class="btn btn-ghost btn-add-exc" data-scope="intervals">Добавить</button>
+            </div>
+            ${exceptionsTable(flow.intervals.exceptions)}
+          </div>
+        </div>`;
+
+      card.innerHTML = `
+        <div class="head">
+          <input class="input" data-bind="name" style="max-width:380px;" placeholder="Наименование потока" value="${esc(flow.name)}">
+          <select class="select" data-bind="type" style="max-width:200px;">
+            ${ENUMS.flow_types.map(t=> `<option value="${t}" ${flow.type===t?'selected':''}>${typeLabel(t)}</option>`).join('')}
+          </select>
+          <label class="pill" title="Включить/выключить поток">
+            <input type="checkbox" data-bind="enabled" ${flow.enabled?'checked':''}> <span style="margin-left:6px;">включен</span>
+          </label>
+          <span class="grow"></span>
+          <button class="btn btn-danger btn-del-flow">Удалить поток</button>
+        </div>
+
+        <div style="margin-top:10px"></div>
+        ${telegramBox}
+        ${ronetBox}
+
+        <div class="card" style="padding:12px; margin-top:12px;">
+          <div class="toolbar" style="justify-content:space-between;">
+            <h3 style="margin:0;">Параметры</h3>
+            <button class="btn btn-primary btn-add-param">Добавить параметр</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table-mini">
+              <thead>
+                <tr>
+                  <th>Имя (ключ)</th>
+                  <th>Имя в сообщении</th>
+                  <th>Расположение</th>
+                  <th class="right">Номинал</th>
+                  <th class="right">Погрешн.</th>
+                  <th>Норма</th>
+                  <th>Авария</th>
+                  <th class="right">Действия</th>
+                </tr>
+              </thead>
+              <tbody>${paramsRows || `<tr><td colspan="8" class="hint">Параметров пока нет.</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid cols-2" style="margin-top:12px;">
+          ${eventsCard}
+          ${intervalsCard}
+        </div>
+      `;
+
+      // bind value changes
+      card.addEventListener('input', (ev)=>{
+        const el = ev.target;
+        const bind = el.getAttribute('data-bind');
+        if(!bind) return;
+        const path = bind.split('.');
+        setByPath(flow, path, valueFromInput(el));
+        // toggle type boxes
+        if(bind==='type'){
+          card.querySelector('[data-opt="telegram"]').style.display = (flow.type==='telegram'?'':'none');
+          card.querySelector('[data-opt="ronet"]').style.display = (flow.type==='ronet'?'':'none');
+        }
+      });
+
+      // actions
+      card.addEventListener('click', (ev)=>{
+        const btn = ev.target.closest('button'); if(!btn) return;
+
+        if(btn.classList.contains('btn-del-flow')){
+          if(!confirm(`Удалить поток «${flow.name}»?`)) return;
+          CFG.flows.splice(idx,1); render(); return;
+        }
+
+        if(btn.classList.contains('btn-add-param')){
+          openParamModal(idx, null);
+          return;
+        }
+        if(btn.classList.contains('btn-edit-param')){
+          const tr = btn.closest('tr'); const pi = +tr.dataset.pi;
+          openParamModal(idx, pi);
+          return;
+        }
+        if(btn.classList.contains('btn-del-param')){
+          const tr = btn.closest('tr'); const pi = +tr.dataset.pi;
+          if(!confirm('Удалить параметр?')) return;
+          const delKey = flow.params[pi]?.key;
+          flow.params.splice(pi,1);
+          if (delKey) {
+            // также убирать из выбранных/исключений
+            flow.events.selected    = flow.events.selected.filter(k => k !== delKey);
+            flow.intervals.selected = flow.intervals.selected.filter(k => k !== delKey);
+            flow.events.exceptions  = (flow.events.exceptions  || []).filter(e => e.key !== delKey);
+            flow.intervals.exceptions = (flow.intervals.exceptions || []).filter(e => e.key !== delKey);
+          }
+          render();
+          return;
+        }
+
+        // pickers for selected params
+        if(btn.classList.contains('btn-pick')){
+          openPicker(idx, btn.dataset.scope);
+          return;
+        }
+
+        // exceptions
+        if(btn.classList.contains('btn-add-exc')){
+          const scope = btn.dataset.scope;
+          const key = promptPickKey(flow, scope);
+          if(!key) return;
+          const val = prompt('Значение (строгое равенство; для булевых 0 или 1):','0');
+          if(val===null) return;
+          (flow[scope].exceptions).push({ key, value: String(val) });
+          render();
+          return;
+        }
+      });
+
+      // remove tag from selections
+      card.addEventListener('click', (ev)=>{
+        const span = ev.target.closest('.tag .x'); if(!span) return;
+        const tag = ev.target.closest('.tag');
+        const key = tag?.dataset.key;
+        const scope = ev.target.closest('[data-tags]').getAttribute('data-tags');
+        if(!key || !scope) return;
+        flow[scope].selected = flow[scope].selected.filter(k=> k!==key);
+        render();
+      });
+
+      flowsEl.appendChild(card);
+    });
+
+    if(CFG.flows.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'card';
+      empty.innerHTML = `<div class="hint">Потоков пока нет. Нажмите «Добавить поток», чтобы создать первый (например, Telegram).</div>`;
+      flowsEl.appendChild(empty);
+    }
+  }
+
+  function exceptionsTable(list){
+    if(!list || list.length===0) return `<div class="hint">Исключений нет.</div>`;
+    return `
+      <div class="table-wrap">
+        <table class="table-mini">
+          <thead>
+            <tr><th>Параметр</th><th>Значение</th><th class="right">Действия</th></tr>
+          </thead>
+          <tbody>
+            ${list.map((e,i)=> {
+              const p = KNOWN.find(x=> keyOf(x)===e.key);
+              const lbl = p ? labelOf(p) : e.key;
+              return `<tr data-exi="${i}">
+                        <td>${esc(lbl)}</td>
+                        <td class="mono">${esc(e.value)}</td>
+                        <td class="right">
+                          <button class="btn btn-ghost" onclick="return (window.__editExc && window.__editExc(this));">Ред.</button>
+                          <button class="btn btn-danger" onclick="return (window.__delExc && window.__delExc(this));">Удалить</button>
+                        </td>
+                      </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // global helpers for inline onclick
+  window.__editExc = (btn)=>{
+    const card = btn.closest('.flow-card');
+    const idx = +card.dataset.idx;
+    const tr = btn.closest('tr');
+    const exi = +tr.dataset.exi;
+    const list = card.querySelector('strong')?.textContent.includes('События')
+      ? CFG.flows[idx].events.exceptions
+      : CFG.flows[idx].intervals.exceptions; // fallback; real scope not trivial with inline buttons
+
+    // robust: detect by walking up to the containing subcard
+    const sub = btn.closest('.subcard');
+    const scope = sub?.querySelector('.toolbar strong')?.textContent.includes('События') ? 'events' : 'intervals';
+
+    const exc = CFG.flows[idx][scope].exceptions[exi];
+    if(!exc) return false;
+    const p = promptPickKey(CFG.flows[idx], scope, exc.key); if(!p) return false;
+    const v = prompt('Значение:', exc.value); if(v===null) return false;
+    exc.key = p; exc.value = String(v);
+    render();
+    return false;
+  };
+  window.__delExc = (btn)=>{
+    const card = btn.closest('.flow-card');
+    const idx = +card.dataset.idx;
+    const tr = btn.closest('tr'); const exi = +tr.dataset.exi;
+    const sub = btn.closest('.subcard');
+    const scope = sub?.querySelector('.toolbar strong')?.textContent.includes('События') ? 'events' : 'intervals';
+    if(!confirm('Удалить исключение?')) return false;
+    CFG.flows[idx][scope].exceptions.splice(exi,1);
+    render();
+    return false;
+  };
+
+  // ───────── modals: param edit ─────────
+  const pm = $('#paramModal');
+  const pmKey = $('#pmKey'), pmAlias=$('#pmAlias'), pmPath=$('#pmPath'),
+        pmNominal=$('#pmNominal'), pmTol=$('#pmTol'), pmOkText=$('#pmOkText'), pmAlarmText=$('#pmAlarmText');
+  let PM_CTX = null; // { flowIdx, paramIdx|null }
+
+  function openParamModal(flowIdx, paramIdx){
+    PM_CTX = {flowIdx, paramIdx};
+    const flow = CFG.flows[flowIdx];
+    // fill select
+    pmKey.innerHTML = KNOWN.map(p=> `<option value="${esc(keyOf(p))}">${esc(labelOf(p))}</option>`).join('');
+    if(paramIdx==null){
+      $('#paramTitle').textContent = 'Добавить параметр';
+      pmAlias.value = ''; pmPath.value=''; pmNominal.value=''; pmTol.value='';
+      pmOkText.value='в норме'; pmAlarmText.value='авария';
+      pmKey.value = pmKey.options[0]?.value || '';
+    }else{
+      $('#paramTitle').textContent = 'Редактировать параметр';
+      const p = flow.params[paramIdx];
+      pmKey.value = p.key;
+      pmAlias.value = p.alias || '';
+      pmPath.value = p.path || '';
+      pmNominal.value = (p.nominal==null?'':p.nominal);
+      pmTol.value = (p.tolerance==null?'':p.tolerance);
+      pmOkText.value = p.ok_text || 'в норме';
+      pmAlarmText.value = p.alarm_text || 'авария';
+    }
+    pm.setAttribute('aria-hidden','false');
+  }
+  function closeParamModal(){ pm.setAttribute('aria-hidden','true'); PM_CTX=null; }
+  $('#pmClose').onclick = closeParamModal;
+  $('#pmCancel').onclick = closeParamModal;
+  $('#pmSave').onclick = ()=>{
+    const flow = CFG.flows[PM_CTX.flowIdx];
+    const item = {
+      key: pmKey.value,
+      alias: pmAlias.value.trim(),
+      path: pmPath.value.trim(),
+      nominal: (pmNominal.value===''? null : +pmNominal.value),
+      tolerance: (pmTol.value===''? null : +pmTol.value),
+      ok_text: pmOkText.value.trim() || 'в норме',
+      alarm_text: pmAlarmText.value.trim() || 'авария',
+    };
+    if(!item.key){ showToast('Выберите «Имя (из конфигурации)»'); return; }
+    if(PM_CTX.paramIdx==null) flow.params.push(item);
+    else flow.params[PM_CTX.paramIdx] = item;
+    closeParamModal(); render();
+  };
+  pm.addEventListener('click', (e)=>{ if(e.target===pm) closeParamModal(); });
+
+  // ───────── modal: pick params for events/intervals ─────────
+  const pick = $('#pickModal'); const pickList = $('#pickList');
+  let PICK_CTX = null; // { flowIdx, scope }
+  function openPicker(flowIdx, scope){
+    PICK_CTX = {flowIdx, scope};
+    $('#pickTitle').textContent = `Выбор параметров — ${scope==='events'?'События':'Интервалы'}`;
+    const flow = CFG.flows[flowIdx];
+    pickList.innerHTML = flow.params.length
+      ? flow.params.map(p=>{
+          const id = `pk_${flowIdx}_${scope}_${hash(p.key)}`;
+          const checked = (flow[scope].selected || []).includes(p.key);
+          const lbl = KNOWN.find(x=> keyOf(x)===p.key);
+          const txt = lbl ? labelOf(lbl) : p.key;
+          return `<label class="chip" for="${id}" style="user-select:none;">
+                    <input id="${id}" type="checkbox" data-key="${esc(p.key)}" ${checked?'checked':''}>
+                    <span>${esc(txt)} <span class="hint">— ${esc(p.alias || '')}</span></span>
+                  </label>`;
+        }).join('')
+      : `<div class="hint">Сначала добавьте параметры в разделе выше.</div>`;
+    pick.setAttribute('aria-hidden','false');
+  }
+  function closePicker(){ pick.setAttribute('aria-hidden','true'); PICK_CTX=null; }
+  $('#pickClose').onclick = closePicker;
+  $('#pickCancel').onclick = closePicker;
+  $('#pickApply').onclick = ()=>{
+    if(!PICK_CTX) return;
+    const keys = qsa('#pickList input[type="checkbox"]').filter(x=> x.checked).map(x=> x.dataset.key);
+    CFG.flows[PICK_CTX.flowIdx][PICK_CTX.scope].selected = keys;
+    closePicker(); render();
+  };
+  pick.addEventListener('click', (e)=>{ if(e.target===pick) closePicker(); });
+
+  // small helpers
+  function esc(s){ return String(s||'').replace(/[&<>"']/g, m=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m])); }
+  function setByPath(obj, path, val){ let o=obj; for(let i=0;i<path.length-1;i++){ const k=path[i]; o[k] = (o[k]??{}); o=o[k]; } o[path[path.length-1]] = val; }
+  function valueFromInput(el){ if(el.type==='checkbox') return el.checked; const v=el.value; const n=Number(v); return (el.type==='number' && !isNaN(n))? n : v; }
+  function typeLabel(t){ return t==='telegram'?'Телеграм' : (t==='ronet'?'RO.NET':t); }
+  function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=((h<<5)-h)+s.charCodeAt(i); h|=0; } return (h>>>0).toString(36); }
+  function promptPickKey(flow, scope, current=null){
+    const avail = flow[scope].selected && flow[scope].selected.length? flow[scope].selected : flow.params.map(p=>p.key);
+    if(avail.length===0){ alert('Нет параметров для выбора'); return null; }
+    const menu = avail.map(k=>{
+      const p = KNOWN.find(x=> keyOf(x)===k);
+      return `  - ${p? labelOf(p):k}`;
+    }).join('\n');
+    const v = prompt('Параметр (точно как в списке):\n' + menu, current || avail[0]);
+    if(v===null) return null;
+    return avail.find(k=> k===v.trim()) || null;
+  }
+
+  // ───────── actions toolbar ─────────
+  $('#btn-add-flow').onclick = ()=>{
+    CFG.flows.push(ensureDefaultsFlow({
+      id: crypto.randomUUID(),
+      name: 'Новый поток',
+      type: (ENUMS.flow_types[0]||'telegram'),
+      enabled: true,
+      options: {},
+      params: [],
+      events: { group_window_s: 10, selected: [], exceptions: [] },
+      intervals: { group_window_s: 60, selected: [], exceptions: [] }
+    }));
+    render();
+  };
+
+  $('#btn-alerts-reload').onclick = async ()=>{
+    try{
+      await apiJson('/api/alerts/reload', {method:'POST'});
+      await loadAll();
+      showToast('Перечитано с диска');
+    }catch(e){ showToast('Ошибка: '+e.message); }
+  };
+
+  $('#btn-alerts-save').onclick = async ()=>{
+    try{
+      // лёгкая валидация
+      for(const f of CFG.flows){
+        if(f.type==='telegram'){
+          if(!f.options.telegram?.bot_token || !f.options.telegram?.chat_id) {
+            if(!confirm(`В потоке «${f.name}» не заполнены bot_token/chat_id. Сохранить всё равно?`)) return;
+            break;
+          }
+        }
+      }
+      await apiJson('/api/alerts/config', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(CFG)
+      });
+      showToast('Сохранено ✔');
+    }catch(e){ showToast('Ошибка: '+e.message); }
+  };
+
+  // ───────── data bootstrap ─────────
+  async function loadAll(){
+    ENUMS = await apiJson('/api/alerts/enums');
+    KNOWN = await apiJson('/api/alerts/known_params');
+    // нормализуем KNOWN к единому виду (на всякий случай)
+    KNOWN = Array.isArray(KNOWN)? KNOWN.map(x=>({ line: x.line, unit_id: +x.unit_id, object: x.object || '', name: x.name })) : [];
+    CFG = await apiJson('/api/alerts/config');
+    if(!CFG || typeof CFG!=='object') CFG = { flows: [] };
+    render();
+  }
+
+  loadAll().catch(e=> showToast('Ошибка инициализации: '+e.message));
+})();
+</script>
+{% endblock %}

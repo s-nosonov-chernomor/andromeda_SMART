@@ -35,6 +35,9 @@ from app.db.session import init_db
 
 from app.api.routes.service import router as service_router
 
+from app.api.routes.alerts import router as alerts_router
+from app.services.alerts_runtime import start_engine_if_needed, stop_engine_if_running
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Пути к статике/шаблонам
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,9 +71,26 @@ app.include_router(mock_router, tags=["mock"])
 app.include_router(andromeda_router, tags=["andromeda"])
 
 app.include_router(service_router, tags=["service"])
+
+app.include_router(alerts_router)
 # ─────────────────────────────────────────────────────────────────────────────
 # Совместимость со «старыми» путями
 # ─────────────────────────────────────────────────────────────────────────────
+# Старт/стоп
+@app.on_event("startup")
+def _on_startup():
+    try:
+        start_engine_if_needed()
+    except Exception as e:
+        # логируйте по желанию
+        print("alerts engine start failed:", e)
+
+@app.on_event("shutdown")
+def _on_shutdown():
+    try:
+        stop_engine_if_running()
+    except Exception:
+        pass
 @app.get("/login")
 def compat_login_page():
     return RedirectResponse(url="/ui/login", status_code=302)
