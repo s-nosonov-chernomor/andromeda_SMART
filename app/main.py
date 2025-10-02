@@ -24,7 +24,7 @@ from app.api.routes.current import router as current_router
 from app.api.routes.journal import router as journal_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.mock import router as mock_router
-from app.api.routes.andromeda_cfg import router as andromeda_router
+from app.api.routes.andromeda_cfg import andromeda_router as andromeda_router
 
 # Сервисы
 from app.services.mqtt_bridge import MqttBridge

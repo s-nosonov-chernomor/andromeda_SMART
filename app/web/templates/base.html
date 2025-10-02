@@ -3,7 +3,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>{{ title or "USPD" }}</title>
+  <title>{% block title %}{{ title or "USPD" }}{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="/static/favicon.ico">
@@ -149,6 +149,15 @@
       const h = nav.offsetHeight || 56;
       document.documentElement.style.setProperty('--nav-h', h + 'px');
     }
+
+    // логаут: API + редирект на /ui/login
+    const btnLogout = document.getElementById('btnLogout');
+    btnLogout?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/auth/logout', {method:'POST'}); } catch(_){}
+      location.href = '/ui/login';
+    });
+
     window.addEventListener('resize', applyNavHeight, {passive:true});
     document.addEventListener('DOMContentLoaded', applyNavHeight, {once:true});
 

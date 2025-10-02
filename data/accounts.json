@@ -2,7 +2,7 @@
   "users": [
     {
       "username": "user",
-      "password_hash": "$pbkdf2-sha256$29000$UYpxTonxXus9B6A0htD6Hw$avXqkpYyOEbxlMlaD0HqeQ4TqQE/ICwB9YuWuTNu9sQ"
+      "password_hash": "$pbkdf2-sha256$29000$OmcspXTufS8lRChFiPF.zw$sITW5aSProWPFjvM1eeKppPV2ZjVwUyZhWB7r4X40kI"
     }
   ]
 }

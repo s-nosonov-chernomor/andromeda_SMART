@@ -364,7 +364,7 @@
         String( (typeof e.address==="undefined")? '' : e.address ),
         e.topic||''
       ];
-      for(var j=0;j=row.length,j<data.length,0;){break;} // no-op, keep syntax simple
+
       // escape quotes: " -> ""
       for(var j=0;j<row.length;j++){
         row[j] = '"' + String(row[j]).split('"').join('""') + '"';

@@ -54,10 +54,28 @@ class MqttBridge:
 
     def publish(self, topic_like: str, value, code: int = 0, status_details: Optional[dict] = None, context: Optional[dict] = None):
         topic = topic_like if topic_like.startswith("/") else f"{self.base}/{topic_like}"
-        meta = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                "status_code": {"code": int(code)}}
-        if status_details: meta["status_code"].update(status_details)
-        payload = {"value": (value if value is None else str(value)), "metadata": meta}
+
+        meta = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z"),
+            "status_code": {"code": int(code)}
+        }
+        # фильтруем 'no_reply' если вдруг прилетает
+        if status_details:
+            sd = dict(status_details)
+            sd.pop("no_reply", None)
+            # приведение silent_for_s к int на всякий случай
+            if "silent_for_s" in sd:
+                try: sd["silent_for_s"] = int(sd["silent_for_s"])
+                except: sd.pop("silent_for_s", None)
+            meta["status_code"].update(sd)
+
+        # добавляем статичный источник
+        payload = {
+            "source": "persay",
+            "value": (value if value is None else str(value)),
+            "metadata": meta
+        }
+
         self.out_queue.put((topic, payload, context or {}))
 
     def register_on_topic(self, topic: str, handler: Callable[[str], bool]) -> None:
@@ -95,6 +113,15 @@ class MqttBridge:
             s = payload.decode("utf-8", errors="ignore")
         except Exception:
             s = str(payload)
+
+        # п.3 — принимаем как {"value":"1"}, так и просто "1"
+        try:
+            j = json.loads(s)
+            if isinstance(j, dict) and "value" in j:
+                s = str(j["value"])
+        except Exception:
+            pass
+
         handler = None
         with self._lock:
             handler = self._handlers.get(topic)
@@ -106,10 +133,12 @@ class MqttBridge:
                 log.error(f"[mqtt] handler error for {topic}: {e}")
 
     def _publisher_loop(self):
+        # начальные значения (дальше будем перечитывать динамически — п.8)
         H = settings.history
         cleanup_every = int(H.get("cleanup_every", 500) or 500)
         ttl_days = int(H.get("ttl_days", 0) or 0)
         max_rows = int(H.get("max_rows", 0) or 0)
+
         i = 0
         while True:
             topic, payload, ctx = self.out_queue.get()
@@ -133,22 +162,32 @@ class MqttBridge:
                         code=int(payload["metadata"]["status_code"]["code"]),
                         message=str(payload["metadata"]["status_code"].get("message","OK")),
                         silent_for_s=int(payload["metadata"]["status_code"].get("silent_for_s",0)),
-                        ts=datetime.utcnow(),
+                        # Пишем UTC с tzinfo (далее API всё равно нормализует, см. /journal)
+                        ts=datetime.now(timezone.utc),
                     )
                     s.add(evt); s.commit()
                     i += 1
                     if i % cleanup_every == 0:
+                        # п.8 — перечитываем лимиты из YAML на лету
+                        H = settings.history or {}
+                        cleanup_every = int(H.get("cleanup_every", cleanup_every) or cleanup_every)
+                        ttl_days = int(H.get("ttl_days", ttl_days) or ttl_days)
+                        max_rows = int(H.get("max_rows", max_rows) or max_rows)
+                        from sqlalchemy import text
+
                         if ttl_days>0:
                             s.execute("DELETE FROM telemetry_events WHERE ts < :cutoff",
-                                      {"cutoff": datetime.utcnow()-timedelta(days=ttl_days)})
+                                      {"cutoff": datetime.utcnow()-timedelta(days=ttl_days)}
+                                      )
                         if max_rows>0:
-                            s.execute("""
+                            s.execute(text("""
                                 DELETE FROM telemetry_events
                                 WHERE id IN (
                                   SELECT id FROM telemetry_events
                                   ORDER BY id DESC
                                   LIMIT -1 OFFSET :keep
-                                )""", {"keep": max_rows})
+                                  )
+                            """), {"keep": max_rows})
                         s.commit()
             except Exception as e:
                 log.error(f"publish error: {e}")

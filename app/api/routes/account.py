@@ -6,6 +6,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
+from time import time
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -82,7 +83,10 @@ def _ensure_default_user() -> None:
 # dependency для защиты UI
 def _require_session(request: Request) -> str:
     user = request.session.get("auth_user")
-    if not user:
+    until = request.session.get("auth_until")
+    now = int(time())
+    if (not user) or (not until) or (int(until) < now):
+        request.session.clear()
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
 
@@ -124,7 +128,7 @@ async def login(request: Request):
 
     # сессия на 1 день
     request.session["auth_user"] = dto.username
-    request.session["auth_until"] = (timedelta(days=1)).total_seconds()
+    request.session["auth_until"] = int(time()) + int(timedelta(days=1).total_seconds())
     return {"ok": True, "user": dto.username}
 
 @router.post("/api/auth/logout")

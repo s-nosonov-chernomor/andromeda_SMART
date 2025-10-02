@@ -1,8 +1,7 @@
 debug:
   enabled: true
-  log_reads: true
+  log_reads: false
   summary_every_s: 20
-  trace_frames: true
 mqtt:
   host: 127.0.0.1
   port: 1883
@@ -48,117 +47,147 @@ lines:
   parity: N
   stopbits: 1
   port_retry_backoff_s: 1
+  rs485_rts_toggle: false
   nodes:
   - unit_id: 44
-    object: object1_io2
     params:
     - name: q1
       register_type: coil
       address: 1001
-      scale: 1.0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
       mode: r
-      publish_mode: on_change_and_interval
+      publish_mode: on_change
       publish_interval_ms: 5000
       topic: site1/room2/io/q1
       error_state: 0
       display_error_text: Что-то не так работает как надо
       mqttROM: Chnl1
-    - name: q8
+      step: null
+      hysteresis: null
+    - name: q81
       register_type: coil
       address: 1002
-      scale: 1.0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
       mode: r
-      publish_mode: on_change_and_interval
+      publish_mode: on_change
       publish_interval_ms: 5000
       topic: site1/room2/io/q3
       error_state: 1
       display_error_text: Снова где то кто то что-то не так сделал походу
       mqttROM: Chnl4
-    - name: d3
-      register_type: coil
-      address: 1003
-      scale: 1.0
-      mode: r
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 10000
-      topic: null
+      step: null
+      hysteresis: null
+    object: object1_io2
     num_object: 1
   - unit_id: 29
-    object: rele2
     params:
-    - name: r1
-      register_type: discrete
-      address: 97
+    - name: время29
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change
+      publish_interval_ms: 5000
+      topic: null
+      error_state: null
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
+    - name: реле1
+      register_type: coil
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change
+      publish_interval_ms: 50000
+      topic: null
+      error_state: 0
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
+    - name: реле2
+      register_type: coil
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change
+      publish_interval_ms: 50000
+      topic: null
+      error_state: 0
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
+    object: rele2
+    num_object: 2
+  - unit_id: 224
+    params:
+    - name: время работы
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change
+      publish_interval_ms: 5000
+      topic: null
+      error_state: 1
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
+    object: счетчик
+  - unit_id: 101
+    params:
+    - name: время работы
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: BA
       scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 50000
+      topic: null
+      error_state: 1
+    object: счетчик
+  - unit_id: 79
+    object: Реле_1
+    params:
+    - name: МощностьК1
+      register_type: input
+      address: 64
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
       mode: r
       publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
+      publish_interval_ms: 0
       topic: null
-    num_object: 2
-  - unit_id: 165
-    object: 1_2по14
-    params: []
-    num_object: 3
-  - unit_id: 224
-    object: счетчик
-    params:
-    - name: время работы
-      register_type: holding
-      address: 110
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
-      topic: null
-      error_state: 1
-  - unit_id: 165
-    object: счетчик
-    params:
-    - name: время работы
-      register_type: holding
-      address: 110
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
-      topic: null
-      error_state: 1
-  - unit_id: 140
-    object: счетчик
-    params: []
-  - unit_id: 98
-    object: счетчик
-    params: []
-  - unit_id: 82
-    object: счетчик
-    params: []
-  - unit_id: 107
-    object: счетчик
-    params: []
-  - unit_id: 43
-    object: счетчик
-    params: []
-  - unit_id: 101
-    object: счетчик
-    params:
-    - name: время работы
-      register_type: holding
-      address: 110
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
-      topic: null
-      error_state: 1
-  - unit_id: 29
-    object: счетчик
-    params:
-    - name: время работы
-      register_type: holding
-      address: 110
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
-      topic: null
-      error_state: 1
+      error_state: null
+      display_error_text: null
+      mqttROM: мощи
+      step: 1000
+      hysteresis: 50
+    num_object: 5

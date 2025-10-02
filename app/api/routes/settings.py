@@ -231,6 +231,7 @@ def add_line(payload: Dict[str, Any]):
         "parity": "N",
         "stopbits": 1,
         "port_retry_backoff_s": 5,
+        "rs485_rts_toggle": False,
         "nodes": []
     })
     backup = _write_cfg(cfg)

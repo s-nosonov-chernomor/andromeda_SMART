@@ -57,7 +57,7 @@ lines:
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: r
       publish_mode: on_change
       publish_interval_ms: 5000
@@ -65,13 +65,15 @@ lines:
       error_state: 0
       display_error_text: Что-то не так работает как надо
       mqttROM: Chnl1
+      step: null
+      hysteresis: null
     - name: q81
       register_type: coil
       address: 1002
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: r
       publish_mode: on_change
       publish_interval_ms: 5000
@@ -79,6 +81,8 @@ lines:
       error_state: 1
       display_error_text: Снова где то кто то что-то не так сделал походу
       mqttROM: Chnl4
+      step: null
+      hysteresis: null
     object: object1_io2
     num_object: 1
   - unit_id: 29
@@ -89,35 +93,48 @@ lines:
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: r
-      publish_mode: on_change_and_interval
+      publish_mode: on_change
       publish_interval_ms: 5000
       topic: null
+      error_state: null
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
     - name: реле1
       register_type: coil
       address: 0
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: rw
-      publish_mode: on_change_and_interval
+      publish_mode: on_change
       publish_interval_ms: 50000
       topic: null
       error_state: 0
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
     - name: реле2
       register_type: coil
       address: 1
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: rw
       publish_mode: on_change
       publish_interval_ms: 50000
       topic: null
       error_state: 0
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
     object: rele2
     num_object: 2
   - unit_id: 224
@@ -128,12 +145,16 @@ lines:
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: rw
       publish_mode: on_change
       publish_interval_ms: 5000
       topic: null
       error_state: 1
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
     object: счетчик
   - unit_id: 101
     params:
@@ -143,14 +164,19 @@ lines:
       words: 1
       data_type: u16
       word_order: BA
-      scale: 1.0
+      scale: 1
       mode: rw
       publish_mode: on_change
       publish_interval_ms: 50000
       topic: null
       error_state: 1
+      display_error_text: null
+      mqttROM: null
+      step: null
+      hysteresis: null
     object: счетчик
   - unit_id: 79
+    object: Реле_1
     params:
     - name: МощностьК1
       register_type: input
@@ -158,13 +184,22 @@ lines:
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: r
       publish_mode: on_change
       publish_interval_ms: 0
       topic: null
+      error_state: null
+      display_error_text: null
       mqttROM: мощи
-      step: 1000.0
-      hysteresis: 50.0
-    object: Реле_1
+      step: 1000
+      hysteresis: 50
     num_object: 5
+- name: line2
+  device: ''
+  baudrate: 9600
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 5
+  nodes: []

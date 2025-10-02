@@ -12,7 +12,8 @@ from app.core.validate_andromeda import validate_andromeda_cfg
 # путь к файлу конфигурации «Андромеды»
 ANDROMEDA_CFG_PATH = os.environ.get("ANDROMEDA_CFG", "./agent.yaml")
 
-router = APIRouter()
+andromeda_router = APIRouter()
+
 templates = Jinja2Templates(directory="app/web/templates")
 
 def _ensure_exists():
@@ -91,7 +92,7 @@ def _backup_and_write_andromeda(raw: str) -> str:
     return backup_name
 
 
-@router.get("/api/andromeda/config", response_class=PlainTextResponse)
+@andromeda_router.get("/api/andromeda/config", response_class=PlainTextResponse)
 def get_cfg():
     _ensure_exists()
     try:
@@ -100,7 +101,7 @@ def get_cfg():
     except Exception as e:
         raise HTTPException(500, f"read error: {e}")
 
-@router.put("/api/andromeda/config")
+@andromeda_router.put("/api/andromeda/config")
 async def put_cfg(request: Request):
     # 1) читаем тело как text/plain или JSON {text|yaml|content}
     raw = await _read_body_text(request)
@@ -124,8 +125,8 @@ async def put_cfg(request: Request):
     # 4) предметная валидация
     try:
         validate_andromeda_cfg(doc)   # если валидатор ждёт dict
-    except TypeError:
-        validate_andromeda_cfg(raw)   # если валидатор ждёт сырой текст
+    except ValueError as e:
+        raise HTTPException(400, f"YAML не прошёл валидацию: {e}")
 
     # 5) запись, бэкап рядом с основным YAML и ротация
     try:
@@ -137,12 +138,12 @@ async def put_cfg(request: Request):
 
 
 
-@router.get("/ui/andromeda", response_class=HTMLResponse)
+@andromeda_router.get("/ui/andromeda", response_class=HTMLResponse)
 def ui_andromeda(request: Request):
     # Меню уже есть в base.html — просто рендерим контент страницы
     return templates.TemplateResponse("andromeda.html", {"request": request})
 
-@router.post("/api/andromeda/restart")
+@andromeda_router.post("/api/andromeda/restart")
 def restart_service():
     """
     Рестарт основного сервиса на Linux.
@@ -154,27 +155,28 @@ def restart_service():
     """
     cfg = settings.get_cfg() or {}
     # сперва смотрим andromeda.restart_cmd, если нет — откатываемся к service.*
-    sec = (cfg.get("andromeda") or cfg.get("service") or {})
-    unit = sec.get("unit", "uspd.service")
-    custom = sec.get("restart_cmd")
+    sec = (cfg.get("andromeda") or {})
+    unit = (sec.get("unit")
+            or (cfg.get("service") or {}).get("unit")
+            or "agent.service")
+    custom = (sec.get("restart_cmd") or "").strip()
 
-    # 1) кастомная команда из YAML
-    # 1) кастомная команда из YAML
     if custom:
-        # Нормализуем окружение: часто systemctl/pkill и т.п. не находятся
         env = dict(os.environ)
         env["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin"
-
-        # Если custom — это одна строка с командами/пайпами, запускаем через bash -lc,
-        # чтобы не упасть на bash-измых и чтобы подхватился PATH из env выше.
-        r = subprocess.run(
-            ["/bin/bash", "-lc", custom],
-            check=False, text=True, capture_output=True, env=env
-        )
+        # под Windows запускаем через cmd, под *nix — через bash -lc
+        if os.name == "nt":
+            proc = ["cmd", "/c", custom]
+        else:
+            proc = ["/bin/bash", "-lc", custom]
+        r = subprocess.run(proc, check=False, text=True, capture_output=True, env=env)
         if r.returncode != 0:
             detail = (r.stderr or r.stdout or "").strip()
             raise HTTPException(500, f"restart_cmd failed (rc={r.returncode}): {detail}")
-        return {"ok": True, "via": "restart_cmd", "cmd": custom, "stdout": (r.stdout or '').strip()}
+        return {
+            "ok": True, "via": "restart_cmd", "cmd": custom,
+            "stdout": (r.stdout or '').strip(), "stderr": (r.stderr or '').strip()
+        }
 
     # 2) systemctl (systemd)
     if shutil.which("systemctl"):

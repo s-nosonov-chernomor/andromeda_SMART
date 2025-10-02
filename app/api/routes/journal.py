@@ -1,7 +1,7 @@
 # app/api/routes/journal.py
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from app.db.session import get_db
@@ -10,9 +10,18 @@ from app.db.models import TelemetryEvent
 router = APIRouter()
 
 def _row_to_dict(r: TelemetryEvent):
+
+    # ts может быть naive; считаем его UTC и добавляем Z
+    ts = r.ts
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        ts_out = ts.isoformat()
+    else:
+        ts_out = ts
     return {
         "id": r.id,
-        "ts": (r.ts.isoformat() if isinstance(r.ts, datetime) else r.ts),
+        "ts": ts_out,
         "topic": r.topic,
         "object": r.object,
         "param": r.param,
