@@ -6,6 +6,7 @@ import io
 import json
 import time
 import threading
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Callable
 from pathlib import Path
@@ -173,6 +174,17 @@ class RonetSender(Sender):
 # Утилиты форматирования сообщений
 # ─────────────────────────────────────────────────────────────────────────────
 
+# --- helpers: key "line|unit_id|name" <-> dict ---
+def _parse_key_str(key: str) -> tuple[str, int, str]:
+    parts = (key or "").split("|", 2)
+    if len(parts) != 3:
+        raise ValueError(f"bad key format: {key!r}")
+    line, uid, name = parts
+    return str(line), int(uid), str(name)
+
+def _key_to_str(line: str, unit_id: int, name: str) -> str:
+    return f"{line}|{int(unit_id)}|{name}"
+
 def _html_escape(s: str) -> str:
     return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
@@ -239,12 +251,14 @@ class _Bucket:
     timer: Optional[threading.Timer] = None
 
 class _FlowRuntime:
-    def __init__(self, flow: FlowCfg, sender: Sender):
+    def __init__(self, flow: FlowCfg, sender: Sender, on_flush: Optional[Callable[[dict], None]] = None):
         self.flow = flow
         self.sender = sender
+        self._on_flush = on_flush
         self.lock = threading.RLock()
         self.events = _Bucket(window_s=max(1, int(flow.events.group_window_s or 30)))
         self.intervals = _Bucket(window_s=max(1, int(flow.intervals.group_window_s or 60)))
+        self.last_seen_ts: Optional[float] = None
 
     def _ensure_timer(self, bucket: _Bucket, flush_fn: Callable[[], None]) -> None:
         if bucket.timer and bucket.timer.is_alive():
@@ -281,6 +295,7 @@ class _FlowRuntime:
             self._ensure_timer(bucket, lambda: self._flush(mode))
 
     def on_publish(self, key: ParamKey, value: Any, pub_kind: str, ts: datetime) -> None:
+        self.last_seen_ts = time.time()
         if not self.flow.enabled:
             return
         mode = "interval" if pub_kind == "interval" else "event"
@@ -344,6 +359,27 @@ class _FlowRuntime:
 
         block_title = "События" if mode == "event" else "Интервальные оповещения"
         text = _format_message(self.flow.name, block_title, lines)
+
+        dest = {}
+        if self.flow.type == "telegram":
+            dest = {"telegram_chat_id": (self.flow.telegram or {}).get("chat_id")}
+        elif self.flow.type == "ronet":
+            dest = {"ronet_endpoint": (self.flow.ronet or {}).get("endpoint")}
+
+        if self._on_flush:
+            try:
+                self._on_flush({
+                    "ts": time.time(),
+                    "flow_id": self.flow.id,
+                    "flow_name": self.flow.name,
+                    "mode": mode,  # "event" | "interval"
+                    "count": len(lines),
+                    "dest": dest,
+                    "preview": text[:4000],  # целиком безопасно, но ограничим
+                })
+            except Exception:
+                pass
+
         try:
             self.sender.send(self.flow, text)
         except Exception:
@@ -359,8 +395,33 @@ class AlertsEngine:
         self._lock = threading.RLock()
         self._flows: List[FlowCfg] = []
         self._rt: Dict[str, _FlowRuntime] = {}  # id -> runtime
+        self._last_errors: list[dict[str, Any]] = []
+        self._last_flushes: list[dict[str, Any]] = []
 
     # ── публичные методы для интеграции ──────────────────────────────────────
+
+    def _on_flush(self, info: dict) -> None:
+        self._last_flushes.append(info)
+        if len(self._last_flushes) > 100:
+            self._last_flushes = self._last_flushes[-100:]
+
+    def get_last_flushes(self, limit: int = 20) -> list[dict]:
+        return list(self._last_flushes[-max(0, int(limit)):])
+
+    def _err(self, msg: str):
+        self._last_errors.append({"ts": time.time(), "msg": msg})
+        if len(self._last_errors) > 100:
+            self._last_errors = self._last_errors[-100:]
+        try:
+            print("[alerts] ERROR:", msg)
+        except Exception:
+            pass
+
+    def _info(self, msg: str):
+        try:
+            print("[alerts]", msg)
+        except Exception:
+            pass
 
     def start(self) -> None:
         self.reload_config()
@@ -384,7 +445,7 @@ class AlertsEngine:
             self._rt.clear()
             for f in flows:
                 sender = TelegramSender() if f.type == "telegram" else RonetSender()
-                self._rt[f.id] = _FlowRuntime(f, sender)
+                self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
 
     def notify_publish(self, *, line: str, unit_id: int, name: str,
                        value: Any, pub_kind: str, ts: Optional[datetime] = None) -> None:
@@ -420,7 +481,7 @@ class AlertsEngine:
             self._rt.clear()
             for f in flows:
                 sender = TelegramSender() if f.type == "telegram" else RonetSender()
-                self._rt[f.id] = _FlowRuntime(f, sender)
+                self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
         return backup
 
     def list_known_params_from_main_cfg(self) -> List[Dict[str, Any]]:
@@ -499,69 +560,231 @@ class AlertsEngine:
         tmp.replace(target)
         return backup_name
 
+    # app/services/alerts_engine.py
+
+    def diag(self) -> Dict[str, Any]:
+        with self._lock:
+            flows = []
+            for f in self._flows:
+                rt = self._rt.get(f.id)
+                flows.append({
+                    "id": f.id,
+                    "name": f.name,
+                    "type": f.type,
+                    "enabled": bool(f.enabled),
+                    "params": len(f.params or []),
+                    "events_selected": len((f.events.include or [])),
+                    "intervals_selected": len((f.intervals.include or [])),
+                    "runtime": {
+                        "events_buffer": (len(rt.events.items) if rt else 0),
+                        "intervals_buffer": (len(rt.intervals.items) if rt else 0),
+                        "last_seen": getattr(rt, "last_seen_ts", None),
+                    },
+                    # НОВОЕ: чтобы не гадать, подхватились ли токены
+                    "telegram": {
+                        "has_token": bool((f.telegram or {}).get("bot_token")),
+                        "has_chat_id": bool((f.telegram or {}).get("chat_id")),
+                        "chat_id": str((f.telegram or {}).get("chat_id", ""))[:6] + "…" if (f.telegram or {}).get(
+                            "chat_id") else "",
+                    } if f.type == "telegram" else None,
+                })
+            return {
+                "running": True,
+                "flows": flows,
+                "last_errors": self._last_errors[-10:],
+            }
+
+    def send_test_telegram(self, flow_id: str, text: str) -> tuple[bool, str]:
+        import urllib.request, urllib.parse
+        with self._lock:
+            f = next((x for x in self._flows if x.id == flow_id), None)
+        if not f:
+            return False, f"flow {flow_id} not found"
+        if f.type != "telegram":
+            return False, f"flow {flow_id} is not telegram"
+
+        tok = (f.telegram or {}).get("bot_token") or ""
+        chat = (f.telegram or {}).get("chat_id") or ""
+        if not tok:
+            return False, "bot_token is empty"
+        if not chat:
+            return False, "chat_id is empty"
+
+        url = f"https://api.telegram.org/bot{tok}/sendMessage"
+        payload = {
+            "chat_id": chat,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        data = urllib.parse.urlencode(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                resp = r.read()
+            return True, "sent"
+        except Exception as e:
+            self._err(f"send_test_telegram failed: {e}")
+            return False, f"{e.__class__.__name__}: {e}"
+
     # ── сериализация/валидация ──────────────────────────────────────────────
 
     def _parse_cfg(self, raw: Dict[str, Any]) -> List[FlowCfg]:
         flows: List[FlowCfg] = []
         for i, it in enumerate((raw or {}).get("flows", []) or []):
-            fid = str(it.get("id") or f"flow-{i+1}")
+            fid = str(it.get("id") or f"flow-{i + 1}")
             name = str(it.get("name") or fid)
-            typ  = str(it.get("type") or "telegram").lower()
+            typ = str(it.get("type") or "telegram").lower()
             if typ not in ("telegram", "ronet"):
                 typ = "telegram"
             enabled = bool(it.get("enabled", True))
 
+            # options.telegram|ronet (новый фронт) + fallback на топ-левел telegram/ronet
+            opts = it.get("options", {}) or {}
+            tele1 = (opts.get("telegram") or {}) if isinstance(opts, dict) else {}
+            tele2 = it.get("telegram") or {}
+            telegram_opts: Dict[str, Any] = {}
+            for k in ("bot_token", "chat_id"):
+                v = None
+                v1 = tele1.get(k) if isinstance(tele1, dict) else None
+                v2 = tele2.get(k) if isinstance(tele2, dict) else None
+                # выбираем первый непустой (не None и не пустая строка)
+                v = (v1 if (v1 is not None and str(v1).strip() != "") else
+                     (v2 if (v2 is not None and str(v2).strip() != "") else None))
+                if v is not None:
+                    telegram_opts[k] = str(v)
+
+            rn1 = (opts.get("ronet") or {}) if isinstance(opts, dict) else {}
+            rn2 = it.get("ronet") or {}
+            ronet_opts: Dict[str, Any] = {}
+            for k in ("endpoint_url", "endpoint", "api_key", "token"):  # на будущее
+                v1 = rn1.get(k) if isinstance(rn1, dict) else None
+                v2 = rn2.get(k) if isinstance(rn2, dict) else None
+                v = (v1 if (v1 is not None and str(v1).strip() != "") else
+                     (v2 if (v2 is not None and str(v2).strip() != "") else None))
+                if v is not None:
+                    ronet_opts[k] = str(v)
+
+            # params: принимаем либо старый вид (line/unit_id/name), либо новый (key + path)
             params: List[FlowParam] = []
             for p in it.get("params", []) or []:
                 try:
-                    params.append(FlowParam(
-                        line=str(p.get("line","")),
-                        unit_id=int(p.get("unit_id", 0)),
-                        name=str(p.get("name","")),
-                        alias=str(p.get("alias") or p.get("name","")),
-                        location=str(p.get("location","")),
-                        nominal=(None if p.get("nominal", None) is None else float(p.get("nominal"))),
-                        tolerance=(None if p.get("tolerance", None) is None else float(p.get("tolerance"))),
-                        ok_text=str(p.get("ok_text","OK")),
-                        alarm_text=str(p.get("alarm_text","ALARM")),
-                    ))
+                    if "key" in p:
+                        line, uid, pname = _parse_key_str(str(p.get("key") or "||"))
+                        params.append(FlowParam(
+                            line=line,
+                            unit_id=int(uid),
+                            name=pname,
+                            alias=str(p.get("alias") or pname),
+                            location=str(p.get("path") or ""),
+                            nominal=(None if p.get("nominal", None) is None else float(p.get("nominal"))),
+                            tolerance=(None if p.get("tolerance", None) is None else float(p.get("tolerance"))),
+                            ok_text=str(p.get("ok_text", "OK")),
+                            alarm_text=str(p.get("alarm_text", "ALARM")),
+                        ))
+                    else:
+                        params.append(FlowParam(
+                            line=str(p.get("line", "")),
+                            unit_id=int(p.get("unit_id", 0)),
+                            name=str(p.get("name", "")),
+                            alias=str(p.get("alias") or p.get("name", "")),
+                            location=str(p.get("location", "") or p.get("path", "")),
+                            nominal=(None if p.get("nominal", None) is None else float(p.get("nominal"))),
+                            tolerance=(None if p.get("tolerance", None) is None else float(p.get("tolerance"))),
+                            ok_text=str(p.get("ok_text", "OK")),
+                            alarm_text=str(p.get("alarm_text", "ALARM")),
+                        ))
                 except Exception:
+                    # пропускаем битый элемент
                     continue
 
-            def _flt(d: Dict[str, Any]) -> FlowFilter:
-                return FlowFilter(
-                    group_window_s = int((d or {}).get("group_window_s", 30)),
-                    include = list((d or {}).get("include", []) or []),
-                    exceptions = list((d or {}).get("exceptions", []) or []),
-                )
+            # sections: events / intervals
+            def _mk_filter(d: Dict[str, Any]) -> FlowFilter:
+                group_s = int((d or {}).get("group_window_s", 30))
+
+                include: List[Dict[str, Any]] = []
+                # новый фронт: selected = ["line|uid|name"]
+                sel = (d or {}).get("selected", None)
+                if isinstance(sel, list):
+                    for s in sel:
+                        try:
+                            line, uid, pname = _parse_key_str(str(s))
+                            include.append({"line": line, "unit_id": int(uid), "name": pname})
+                        except Exception:
+                            pass
+                else:
+                    # старый формат: include = [{line,unit_id,name}]
+                    include = list((d or {}).get("include", []) or [])
+
+                exceptions: List[Dict[str, Any]] = []
+                exc = (d or {}).get("exceptions", []) or []
+                for ex in exc:
+                    if isinstance(ex, dict) and "key" in ex:
+                        # новый фронт: { key, value }
+                        try:
+                            line, uid, pname = _parse_key_str(str(ex.get("key")))
+                            exceptions.append(
+                                {"line": line, "unit_id": int(uid), "name": pname, "value": ex.get("value")})
+                        except Exception:
+                            pass
+                    else:
+                        # старый формат уже dict с line/unit_id/name/value
+                        exceptions.append(ex)
+
+                return FlowFilter(group_window_s=group_s, include=include, exceptions=exceptions)
 
             flows.append(FlowCfg(
                 id=fid, name=name, type=typ, enabled=enabled,
-                telegram=it.get("telegram", {}) or {},
-                ronet=it.get("ronet", {}) or {},
+                telegram=telegram_opts,
+                ronet=ronet_opts,
                 params=params,
-                events=_flt(it.get("events", {})),
-                intervals=_flt(it.get("intervals", {})),
+                events=_mk_filter(it.get("events", {})),
+                intervals=_mk_filter(it.get("intervals", {})),
             ))
+
         return flows
 
     def _serialize_cfg(self, flows: List[FlowCfg]) -> Dict[str, Any]:
         out: Dict[str, Any] = {"flows": []}
         for f in flows:
+            # selected: из include -> список строк-ключей
+            def _mk_selected(flt: FlowFilter) -> List[str]:
+                keys = []
+                for it in (flt.include or []):
+                    try:
+                        keys.append(
+                            _key_to_str(str(it.get("line", "")), int(it.get("unit_id", 0)), str(it.get("name", ""))))
+                    except Exception:
+                        pass
+                return keys
+
+            # exceptions: из {line,unit_id,name,value} -> {key,value}
+            def _mk_exceptions(flt: FlowFilter) -> List[Dict[str, Any]]:
+                res = []
+                for ex in (flt.exceptions or []):
+                    try:
+                        k = _key_to_str(str(ex.get("line", "")), int(ex.get("unit_id", 0)), str(ex.get("name", "")))
+                        res.append({"key": k, "value": ex.get("value")})
+                    except Exception:
+                        pass
+                return res
+
             out["flows"].append({
                 "id": f.id,
                 "name": f.name,
                 "type": f.type,
                 "enabled": bool(f.enabled),
-                "telegram": f.telegram or {},
-                "ronet": f.ronet or {},
+                "options": {
+                    "telegram": f.telegram or {},
+                    "ronet": f.ronet or {},
+                },
                 "params": [
                     {
-                        "line": p.line,
-                        "unit_id": p.unit_id,
-                        "name": p.name,
+                        "key": _key_to_str(p.line, p.unit_id, p.name),
                         "alias": p.alias,
-                        "location": p.location,
+                        "path": p.location,
                         "nominal": p.nominal,
                         "tolerance": p.tolerance,
                         "ok_text": p.ok_text,
@@ -570,13 +793,13 @@ class AlertsEngine:
                 ],
                 "events": {
                     "group_window_s": f.events.group_window_s,
-                    "include": f.events.include or [],
-                    "exceptions": f.events.exceptions or [],
+                    "selected": _mk_selected(f.events),
+                    "exceptions": _mk_exceptions(f.events),
                 },
                 "intervals": {
                     "group_window_s": f.intervals.group_window_s,
-                    "include": f.intervals.include or [],
-                    "exceptions": f.intervals.exceptions or [],
+                    "selected": _mk_selected(f.intervals),
+                    "exceptions": _mk_exceptions(f.intervals),
                 }
             })
         return out

@@ -8,6 +8,8 @@ from app.db.session import SessionLocal
 from app.db.models import TelemetryEvent
 from app.core.config import settings
 from app.services.current_store import current_store  # ← ДОБАВИЛИ
+from app.services.alerts_runtime import engine_instance
+
 import logging
 
 log = logging.getLogger("mqtt")
@@ -133,7 +135,6 @@ class MqttBridge:
                 log.error(f"[mqtt] handler error for {topic}: {e}")
 
     def _publisher_loop(self):
-        # начальные значения (дальше будем перечитывать динамически — п.8)
         H = settings.history
         cleanup_every = int(H.get("cleanup_every", 500) or 500)
         ttl_days = int(H.get("ttl_days", 0) or 0)
@@ -143,12 +144,16 @@ class MqttBridge:
         while True:
             topic, payload, ctx = self.out_queue.get()
             try:
+                # единое UTC-время публикации
+                ts_utc = datetime.now(timezone.utc)  # <<<
+
+                # публикуем в брокер
                 self.client.publish(topic, json.dumps(payload), qos=self.qos, retain=self.retain)
 
-                # обновляем «текущие» (ts — только при code==0)
-                current_store.apply_publish(ctx, payload, datetime.now(timezone.utc))
+                # обновляем «текущие»
+                current_store.apply_publish(ctx, payload, ts_utc)  # <<<
 
-                # пишем историю
+                # пишем историю (используем тот же ts_utc)
                 with SessionLocal() as s:
                     evt = TelemetryEvent(
                         topic=topic,
@@ -162,13 +167,13 @@ class MqttBridge:
                         code=int(payload["metadata"]["status_code"]["code"]),
                         message=str(payload["metadata"]["status_code"].get("message","OK")),
                         silent_for_s=int(payload["metadata"]["status_code"].get("silent_for_s",0)),
-                        # Пишем UTC с tzinfo (далее API всё равно нормализует, см. /journal)
-                        ts=datetime.now(timezone.utc),
+                        ts=ts_utc,  # <<<
                     )
                     s.add(evt); s.commit()
                     i += 1
+
+                    # ——— периодическая уборка истории (как было) ———
                     if i % cleanup_every == 0:
-                        # п.8 — перечитываем лимиты из YAML на лету
                         H = settings.history or {}
                         cleanup_every = int(H.get("cleanup_every", cleanup_every) or cleanup_every)
                         ttl_days = int(H.get("ttl_days", ttl_days) or ttl_days)
@@ -177,8 +182,7 @@ class MqttBridge:
 
                         if ttl_days>0:
                             s.execute("DELETE FROM telemetry_events WHERE ts < :cutoff",
-                                      {"cutoff": datetime.utcnow()-timedelta(days=ttl_days)}
-                                      )
+                                      {"cutoff": datetime.utcnow()-timedelta(days=ttl_days)})
                         if max_rows>0:
                             s.execute(text("""
                                 DELETE FROM telemetry_events
@@ -186,8 +190,41 @@ class MqttBridge:
                                   SELECT id FROM telemetry_events
                                   ORDER BY id DESC
                                   LIMIT -1 OFFSET :keep
-                                  )
+                                )
                             """), {"keep": max_rows})
                         s.commit()
+
+                # ——— НОВОЕ: отдать публикацию в движок оповещений ———
+                try:
+                    eng = engine_instance()
+                    if eng:
+                        # нормализуем триггер из payload
+                        trigger = str(
+                            (payload.get("metadata", {}).get("status_code", {}) or {}).get("trigger", "")
+                        ).strip().lower()
+                        if trigger not in ("event", "interval"):
+                            trigger = "event"
+
+                        # время публикации, если есть ISO-метка
+                        ts_iso = (payload.get("metadata", {}) or {}).get("timestamp")
+                        ts_dt = None
+                        if ts_iso:
+                            try:
+                                ts_dt = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+                            except Exception:
+                                ts_dt = None
+
+                        # из ctx берём адрес параметра
+                        eng.notify_publish(
+                            line=ctx.get("line", ""),
+                            unit_id=int(ctx.get("unit_id", 0) or 0),
+                            name=ctx.get("param", ""),
+                            value=payload.get("value"),
+                            pub_kind=trigger,
+                            ts=ts_dt
+                        )
+                except Exception as e:
+                    log.error(f"[alerts] notify_publish error: {e}")
+
             except Exception as e:
                 log.error(f"publish error: {e}")

@@ -1,27 +1,27 @@
 # app/api/routes/alerts.py
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Body
 from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
-
+from pydantic import BaseModel
 import yaml
 
-from app.services.alerts_engine import alerts_engine
-from app.core.config import settings
-
-from app.core.alerts_config import read_alerts_cfg, save_alerts_cfg
+from app.services.alerts_engine import alerts_engine   # CHANGED: будем обращаться прямо к синглтону
+from app.services.alerts_runtime import engine_instance, ensure_started  # CHANGED
 from app.core.validate_alerts import validate_alerts_cfg
-from app.services.alerts_runtime import engine_instance
 
 router = APIRouter()
 
 # Папка с шаблонами (как в других роутерах)
 templates = Jinja2Templates(directory="app/web/templates")
 
+# гарантируем запуск движка при подключении роутера
+ensure_started()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UI
@@ -51,15 +51,12 @@ def get_enums():
 
 @router.get("/api/alerts/config")
 def get_alerts_config():
-    """
-    Вернуть текущую нормализованную конфигурацию alerts.yaml (JSON).
-    Читаем через storage, который сам делает нормализацию legacy-полей.
-    """
     try:
-        return read_alerts_cfg()
+        ensure_started()
+        eng = engine_instance()
+        return eng.dump_config() if eng else {"flows": []}
     except Exception as e:
         raise HTTPException(500, f"read config failed: {e}")
-
 
 @router.put("/api/alerts/config")
 async def put_alerts_config(request: Request):
@@ -115,30 +112,19 @@ async def put_alerts_config(request: Request):
 
     # 4) сохраняем YAML (+ backup/rotation) и перезапускаем движок
     try:
-        backup = save_alerts_cfg(data)
+        backup = alerts_engine.save_config(data)
     except Exception as e:
         raise HTTPException(500, f"save failed: {e}")
 
-    # перезапуск рантайма с переданным конфигом
-    eng = engine_instance()
-    if eng:
-        try:
-            eng.reload(data)
-        except Exception as e:
-            # файл уже сохранён; сообщаем о состоянии честно
-            raise HTTPException(500, f"config saved (backup: {backup}), but runtime reload failed: {e}")
-
     return {"ok": True, "backup": backup}
-
-
 
 @router.post("/api/alerts/reload")
 def reload_alerts_config():
-    """
-    Перечитать alerts.yaml с диска и перезапустить потоки.
-    """
     try:
-        alerts_engine.reload_config()
+        ensure_started()
+        eng = engine_instance()
+        if eng:
+            eng.reload_config()
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, f"reload failed: {e}")
@@ -155,3 +141,73 @@ def list_known_params():
         return items
     except Exception as e:
         raise HTTPException(500, f"list params failed: {e}")
+
+# ───────────────── Диагностика/тест ─────────────────
+class TestTelegramDTO(BaseModel):
+    flow_id: str
+    text: str = "Проверка: 👋 это тестовое сообщение от USPD"
+
+@router.get("/api/alerts/diag")
+def alerts_diag():
+    eng = engine_instance()
+    if not eng:
+        return {"running": False, "detail": "engine is not started"}
+    try:
+        return eng.diag()
+    except Exception as e:
+        raise HTTPException(500, f"diag failed: {e}")
+
+
+@router.post("/api/alerts/test_telegram")
+def alerts_test_telegram(dto: TestTelegramDTO):
+    eng = engine_instance()
+    if not eng:
+        raise HTTPException(503, "engine is not running")
+    try:
+        ok, detail = eng.send_test_telegram(dto.flow_id, dto.text)
+        return {"ok": ok, "detail": detail}
+    except Exception as e:
+        raise HTTPException(500, f"test send failed: {e}")
+
+@router.get("/api/alerts/outbox")
+def alerts_outbox(limit: int = 20):
+    eng = engine_instance()
+    if not eng:
+        return {"running": False, "items": []}
+    try:
+        return {"running": True, "items": eng.get_last_flushes(limit)}
+    except Exception as e:
+        raise HTTPException(500, f"outbox failed: {e}")
+
+
+class SimPublishDTO(BaseModel):
+    line: str
+    unit_id: int
+    name: str
+    value: Any
+    pub_kind: str = "event"      # "event" | "interval"
+    ts: Optional[str] = None     # ISO8601 или Unix (строкой), опц.
+
+@router.post("/api/alerts/sim_publish")
+def alerts_sim_publish(dto: SimPublishDTO):
+    # используем singleton через runtime-обёртку
+    eng = engine_instance()
+    if not eng:
+        raise HTTPException(503, "engine is not running")
+
+    # разберём ts, если передан
+    ts_dt = None
+    if dto.ts:
+        try:
+            if dto.ts.isdigit():
+                ts_dt = datetime.fromtimestamp(int(dto.ts), tz=timezone.utc)
+            else:
+                ts_dt = datetime.fromisoformat(dto.ts)
+        except Exception:
+            ts_dt = None
+
+    eng.notify_publish(
+        line=dto.line, unit_id=int(dto.unit_id), name=dto.name,
+        value=dto.value, pub_kind=dto.pub_kind, ts=ts_dt
+    )
+    return {"ok": True}

@@ -36,7 +36,9 @@ from app.db.session import init_db
 from app.api.routes.service import router as service_router
 
 from app.api.routes.alerts import router as alerts_router
-from app.services.alerts_runtime import start_engine_if_needed, stop_engine_if_running
+from app.services.alerts_runtime import ensure_started as start_engine_if_needed, stop_if_running as stop_engine_if_running
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Пути к статике/шаблонам

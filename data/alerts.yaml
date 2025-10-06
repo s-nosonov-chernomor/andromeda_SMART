@@ -1,30 +1,36 @@
 flows:
 - id: eeb9d856-39b2-45e6-8540-687a9cbf72e0
-  name: Тест1
+  name: Комплекс РАДУЖНЫЙ
   type: telegram
   enabled: true
   options:
     telegram:
-      bot_token: ''
-      chat_id: ''
+      bot_token: 5459732327:AAHSXiZcWPPTOa4w5C42LAWQM4LK_wQMGHA
+      chat_id: '580097120'
+    ronet: {}
   params:
   - key: line1|79|МощностьК1
     alias: Освещение теплицы
-    path: Комплекс 1 / Тепличный узел 3 / Теплица 12
+    path: Цветочная зона / Теплица 12
     nominal: 5000
-    tolerance: 100
+    tolerance: 300
     ok_text: В пределах нормы
     alarm_text: есть сгоревшие точки
+  - key: line1|224|Ток_7
+    alias: Засветка цветов
+    path: Отделение ФИКУС / теплица 34
+    nominal: 50
+    tolerance: 5
+    ok_text: Идеально
+    alarm_text: недостаток света
   events:
-    group_window_s: 10
+    group_window_s: 1
     selected:
     - line1|79|МощностьК1
+    - line1|224|Ток_7
     exceptions: []
   intervals:
     group_window_s: 10
     selected:
     - line1|79|МощностьК1
     exceptions: []
-  telegram:
-    chat_id: '580097120'
-    bot_token: 5459732327:AAHSXiZcWPPTOa4w5C42LAWQM4LK_wQMGHA

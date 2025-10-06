@@ -30,7 +30,7 @@ andromeda:
 current:
   touch_read_every_s: 3
 polling:
-  interval_ms: 500
+  interval_ms: 1000
   jitter_ms: 120
   backoff_ms: 500
   max_errors_before_backoff: 5
@@ -82,42 +82,7 @@ lines:
     object: object1_io2
     num_object: 1
   - unit_id: 29
-    params:
-    - name: время29
-      register_type: holding
-      address: 110
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1.0
-      mode: r
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 5000
-      topic: null
-    - name: реле1
-      register_type: coil
-      address: 0
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change_and_interval
-      publish_interval_ms: 50000
-      topic: null
-      error_state: 0
-    - name: реле2
-      register_type: coil
-      address: 1
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change
-      publish_interval_ms: 50000
-      topic: null
-      error_state: 0
+    params: []
     object: rele2
     num_object: 2
   - unit_id: 224
@@ -134,6 +99,19 @@ lines:
       publish_interval_ms: 5000
       topic: null
       error_state: 1
+    - name: Ток_7
+      register_type: input
+      address: 4373
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 10000
+      topic: null
+      step: 10
+      hysteresis: 1
     object: счетчик
   - unit_id: 101
     params:
@@ -158,13 +136,73 @@ lines:
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
+      scale: 1
       mode: r
-      publish_mode: on_change
-      publish_interval_ms: 0
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 3600000
       topic: null
       mqttROM: мощи
-      step: 1000.0
-      hysteresis: 50.0
-    object: Реле_1
+      step: 100
+      hysteresis: 20
+    - name: contact1
+      register_type: coil
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 60000
+      topic: null
+      step: null
+      hysteresis: null
+    - name: contakt_2
+      register_type: coil
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 60000
+      topic: null
+      step: null
+      hysteresis: null
+    object: RELE_1
     num_object: 5
+  - unit_id: 43
+    object: мио 5
+    params:
+    - name: д431
+      register_type: coil
+      address: 1000
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 50000
+      topic: null
+      step: null
+      hysteresis: null
+    num_object: 4
+  - unit_id: 98
+    object: мио 6
+    params:
+    - name: д981
+      register_type: coil
+      address: 1000
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 0
+      topic: null
+      step: null
+      hysteresis: null
+    num_object: 6
