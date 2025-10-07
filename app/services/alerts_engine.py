@@ -6,6 +6,14 @@ import io
 import json
 import time
 import threading
+import logging
+import requests
+
+try:
+    import certifi
+    _CERT_BUNDLE = certifi.where()
+except Exception:
+    _CERT_BUNDLE = None
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Callable
@@ -127,28 +135,55 @@ class Sender:
         raise NotImplementedError
 
 class TelegramSender(Sender):
-    def send(self, flow: FlowCfg, text: str) -> None:
+    def __init__(self, insecure_tls: bool = False, timeout: int = 10, trust_env: bool = False):
+        self.insecure_tls = insecure_tls
+        self.timeout = timeout
+        self.trust_env = trust_env
+        self.log = logging.getLogger("alerts.telemetry")
+
+    def send(self, flow: FlowCfg, text: str) -> bool:
         tok = (flow.telegram or {}).get("bot_token") or ""
         chat = (flow.telegram or {}).get("chat_id") or ""
+        tok = tok.strip()
+        chat = str(chat).strip()
         if not tok or not chat:
-            return
-        # Используем простой urllib, без внешних зависимостей.
+            self.log.warning("telegram: empty token/chat (flow=%s)", flow.id)
+            return False
+
         url = f"https://api.telegram.org/bot{tok}/sendMessage"
         payload = {
             "chat_id": chat,
             "text": text,
-            "parse_mode": "HTML",  # проще экранировать, чем MarkdownV2
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
-        data = urllib.parse.urlencode(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+        # Выбираем «verify»: сначала certifi (если есть), иначе системный.
+        verify_arg = False if self.insecure_tls else (_CERT_BUNDLE or True)
+
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                r.read()  # игнорируем ответ
-        except Exception:
-            # Не роняем процесс — логгер UI/сервисов поймает при необходимости
-            pass
+            r = requests.post(
+                url,
+                json=payload,
+                timeout=self.timeout,
+                verify=verify_arg,
+            )
+            if r.status_code != 200:
+                self.log.error("telegram HTTP %s: %s", r.status_code, r.text[:500])
+                return False
+            data = r.json()
+            if not data.get("ok", False):
+                self.log.error("telegram API error: %s", data)
+                return False
+            return True
+
+        except requests.exceptions.SSLError as e:
+            self.log.error("telegram SSL error: %s (insecure_tls=%s)", e, self.insecure_tls)
+            return False
+        except Exception as e:
+            self.log.exception("telegram send failed: %s", e)
+            return False
+
 
 class RonetSender(Sender):
     def send(self, flow: FlowCfg, text: str) -> None:
@@ -380,8 +415,27 @@ class _FlowRuntime:
             except Exception:
                 pass
 
+        ok = False
         try:
-            self.sender.send(self.flow, text)
+            ok = self.sender.send(self.flow, text)
+        except Exception as e:
+            ok = False
+
+        # лог в движок (через синглтон — он уже импортируется так же, как alerts_engine)
+        try:
+            from app.services.alerts_engine import alerts_engine as _eng_singleton
+            _eng_singleton._sent({
+                "ts": time.time(),
+                "flow_id": self.flow.id,
+                "flow_name": self.flow.name,
+                "mode": "События" if mode == "event" else "Интервалы",
+                "count": len(items),
+                "dest": {"telegram_chat_id": (self.flow.telegram or {}).get("chat_id", "")},
+                "preview": text[:1000],
+                "ok": bool(ok),
+            })
+            if not ok:
+                _eng_singleton._err(f"send failed for flow={self.flow.id}")
         except Exception:
             pass
 
@@ -397,6 +451,7 @@ class AlertsEngine:
         self._rt: Dict[str, _FlowRuntime] = {}  # id -> runtime
         self._last_errors: list[dict[str, Any]] = []
         self._last_flushes: list[dict[str, Any]] = []
+        self._sent_log: list[dict[str, Any]] = []  # последние отправки/попытки
 
     # ── публичные методы для интеграции ──────────────────────────────────────
 
@@ -407,6 +462,12 @@ class AlertsEngine:
 
     def get_last_flushes(self, limit: int = 20) -> list[dict]:
         return list(self._last_flushes[-max(0, int(limit)):])
+
+    def _sent(self, item: dict[str, Any]):
+        # item: {ts, flow_id, flow_name, mode, count, dest, preview, ok, err?}
+        self._sent_log.append(item)
+        if len(self._sent_log) > 200:
+            self._sent_log = self._sent_log[-200:]
 
     def _err(self, msg: str):
         self._last_errors.append({"ts": time.time(), "msg": msg})
@@ -444,7 +505,14 @@ class AlertsEngine:
             # пересоздать рантаймы
             self._rt.clear()
             for f in flows:
-                sender = TelegramSender() if f.type == "telegram" else RonetSender()
+                # параметры можно хранить в основном YAML: alerts: { insecure_tls: false, timeout_s: 10 }
+                alerts_sec = getattr(settings, "alerts", {}) or {}
+                insecure = bool(alerts_sec.get("insecure_tls", False))
+                timeout_s = int(alerts_sec.get("http_timeout_s", 10) or 10)
+
+                sender = TelegramSender(insecure_tls=insecure,
+                                        timeout=timeout_s) if f.type == "telegram" else RonetSender()
+
                 self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
 
     def notify_publish(self, *, line: str, unit_id: int, name: str,
@@ -480,7 +548,14 @@ class AlertsEngine:
             self._flows = flows
             self._rt.clear()
             for f in flows:
-                sender = TelegramSender() if f.type == "telegram" else RonetSender()
+                # параметры можно хранить в основном YAML: alerts: { insecure_tls: false, timeout_s: 10 }
+                alerts_sec = getattr(settings, "alerts", {}) or {}
+                insecure = bool(alerts_sec.get("insecure_tls", False))
+                timeout_s = int(alerts_sec.get("http_timeout_s", 10) or 10)
+
+                sender = TelegramSender(insecure_tls=insecure,
+                                        timeout=timeout_s) if f.type == "telegram" else RonetSender()
+
                 self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
         return backup
 

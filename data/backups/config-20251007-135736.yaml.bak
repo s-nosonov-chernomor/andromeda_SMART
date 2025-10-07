@@ -30,7 +30,7 @@ andromeda:
 current:
   touch_read_every_s: 3
 polling:
-  interval_ms: 2000
+  interval_ms: 1000
   jitter_ms: 120
   backoff_ms: 500
   max_errors_before_backoff: 5
@@ -99,6 +99,19 @@ lines:
       publish_interval_ms: 5000
       topic: null
       error_state: 1
+    - name: Ток_7
+      register_type: input
+      address: 4373
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 10000
+      topic: null
+      step: 10
+      hysteresis: 1
     object: счетчик
   - unit_id: 101
     params:
@@ -131,7 +144,33 @@ lines:
       mqttROM: мощи
       step: 100
       hysteresis: 20
-    object: Реле_1
+    - name: contact1
+      register_type: coil
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 60000
+      topic: null
+      step: null
+      hysteresis: null
+    - name: contakt_2
+      register_type: coil
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_ms: 60000
+      topic: null
+      step: null
+      hysteresis: null
+    object: RELE_1
     num_object: 5
   - unit_id: 43
     object: мио 5

@@ -33,5 +33,4 @@ flows:
     group_window_s: 10
     selected:
     - line1|79|МощностьК1
-    - line1|224|Ток_7
     exceptions: []

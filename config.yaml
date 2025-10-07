@@ -11,6 +11,9 @@ mqtt:
   client_id: uspd-modbus-gw
 db:
   url: sqlite:///./data/data.db
+alerts:
+  insecure_tls: false     # временно, чтобы не падать на SSL на УСПД - true
+  http_timeout_s: 10
 history:
   max_rows: 50000
   ttl_days: 15
@@ -107,7 +110,7 @@ lines:
       word_order: AB
       scale: 1
       mode: r
-      publish_mode: on_change_and_interval
+      publish_mode: on_change
       publish_interval_ms: 10000
       topic: null
       step: 10
