@@ -1,4 +1,5 @@
 # app/services/mqtt_bridge.py
+from __future__ import annotations
 import json, queue, threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Callable
@@ -9,6 +10,7 @@ from app.db.models import TelemetryEvent
 from app.core.config import settings
 from app.services.current_store import current_store  # ← ДОБАВИЛИ
 from app.services.alerts_runtime import engine_instance
+
 
 import logging
 
@@ -59,7 +61,9 @@ class MqttBridge:
 
         meta = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z"),
-            "status_code": {"code": int(code)}
+            "status_code": {
+                "source": "persay",
+                "code": int(code)},
         }
         # фильтруем 'no_reply' если вдруг прилетает
         if status_details:
@@ -72,9 +76,9 @@ class MqttBridge:
             meta["status_code"].update(sd)
 
         # добавляем статичный источник
+        norm_value = self._format_value_for_mqtt(value, context)
         payload = {
-            "source": "persay",
-            "value": (value if value is None else str(value)),
+            "value": norm_value,
             "metadata": meta
         }
 
@@ -107,6 +111,54 @@ class MqttBridge:
             log.info(f"[mqtt] unsubscribed: {topic}")
         except Exception:
             pass
+
+    # --- helpers: нормализация значения для MQTT ---
+    def _maybe_bool_like(self, v) -> bool:
+        # Определяет, похоже ли значение на булево (0/1) без контекста
+        try:
+            if isinstance(v, bool):
+                return True
+            if isinstance(v, (int,)):
+                return v in (0, 1)
+            if isinstance(v, float):
+                return v in (0.0, 1.0)
+            s = str(v).strip().lower()
+            return s in {"0", "1", "0.0", "1.0", "true", "false"}
+        except Exception:
+            return False
+
+    def _format_value_for_mqtt(self, value, ctx) -> Optional[str]:
+        """
+        Возвращает строку для payload["value"].
+        Для дискретов приводим к "0"/"1".
+        Для остальных — просто str(value).
+        """
+        if value is None:
+            return None
+
+        rt = (ctx or {}).get("register_type", "")
+        rt = (rt or "").strip().lower()
+
+        BOOL_TYPES = {"bool", "boolean", "bit", "coil", "di", "do", "discrete", "binary"}
+
+        if rt in BOOL_TYPES or (not rt and self._maybe_bool_like(value)):
+            # Жестко нормализуем к "0"/"1"
+            try:
+                if isinstance(value, bool):
+                    return "1" if value else "0"
+                fv = float(str(value).strip())
+                return "1" if fv >= 0.5 else "0"
+            except Exception:
+                # Совсем уж странные значения трактуем как 0
+                return "0"
+
+        # НЕ дискрет — публикуем как есть (строкой)
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, int):
+            return str(value)
+        return str(value)
+
 
     def _on_message(self, client, userdata, msg):
         topic = msg.topic

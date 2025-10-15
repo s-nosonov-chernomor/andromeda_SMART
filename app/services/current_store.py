@@ -144,6 +144,36 @@ class CurrentStore:
             if rtype: st.register_type = rtype
             if addr:  st.address = addr
 
+    def apply_read(self, ctx: Dict[str, Any], value: Any, ts: datetime) -> None:
+        """
+        Обновить «текущие» по факту УСПЕШНОГО чтения с линии,
+        даже если публикации в брокер не было.
+        Не трогаем last_pub_ts, trigger и т.п.
+        """
+        line = str(ctx.get("line", ""))
+        unit = int(ctx.get("unit_id", 0))
+        obj  = str(ctx.get("object", ""))
+        name = str(ctx.get("param", ""))
+        rtype = str(ctx.get("register_type", ""))
+        addr  = int(ctx.get("address", 0))
+
+        key: Key = (line, unit, obj, name)
+        with self._lock:
+            st = self._items.get(key)
+            if not st:
+                st = ParamState(
+                    object=obj, param=name, line=line, unit_id=unit,
+                    register_type=rtype, address=addr
+                )
+                self._items[key] = st
+
+            st.value = value
+            st.code = 0
+            st.message = "OK"
+            if rtype: st.register_type = rtype
+            if addr:  st.address = addr
+            st.last_ok_ts = ts
+            # last_pub_ts НЕ трогаем
 
     def list(self) -> List[Dict[str, Any]]:
         now = datetime.now(timezone.utc)

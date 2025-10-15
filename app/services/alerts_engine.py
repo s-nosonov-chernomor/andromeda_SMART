@@ -252,7 +252,7 @@ def _render_tree_html(tree: Dict[str, Any], level: int = 0) -> str:
     indent = " " * (level * 2)
     for key in sorted([k for k in tree.keys() if k != "_items"]):
         title = _html_escape(key)
-        parts.append(f"{indent}🏷️ <b>{title}</b>")
+        parts.append(f"{indent}💡️ <b>{title}</b>")
         parts.append(_render_tree_html(tree[key], level + 1))
     for leaf in tree.get("_items", []):
         parts.append(f"{indent}• {leaf}")
@@ -263,7 +263,7 @@ def _format_message(flow_name: str, block_title: str, lines: List[Tuple[List[str
     block_title: "События" | "Интервальные оповещения"
     lines: [ (["ЖК","Корпус","Кв"], "Квартира 3 — текст") , ... ]
     """
-    head = f"🛰️ <b>{_html_escape(flow_name)}</b>\n<b>{_html_escape(block_title)}</b>\n"
+    head = f"🍅️ <b>{_html_escape(flow_name)}</b>\n<b>{_html_escape(block_title)}</b>\n"
     tree = _build_tree(lines)
     body = _render_tree_html(tree)
     return head + "\n" + body

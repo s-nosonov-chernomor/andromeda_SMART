@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import minimalmodbus
 import serial
 import math, struct
+import queue
 
 
 try:
@@ -83,6 +84,14 @@ def _iso_utc_ms() -> str:
 def _func_code(reg_type: str) -> int:
     return {"coil": 1, "discrete": 2, "holding": 3, "input": 4}.get(reg_type, 0)
 
+def _round_ndp(v: Optional[float], ndp: int = 3) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        # через формат, чтобы убрать хвосты, затем обратно в float
+        return float(f"{float(v):.{ndp}f}")
+    except Exception:
+        return v
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Класс линии Modbus RTU
@@ -140,6 +149,10 @@ class ModbusLine(threading.Thread):
         # Настройка пульса в current_store (last_ok_ts без публикации)
         cursec = (settings.get_cfg().get("current") or {})
         self.touch_read_every_s: float = float(cursec.get("touch_read_every_s", 3))
+        self.precision_decimals: int = int(cursec.get("precision_decimals", 3))
+
+
+
         # Последний раз, когда мы «тыкали» current_store по данному параметру
         self._last_store_touch_ok: Dict[str, float] = {}
 
@@ -189,6 +202,9 @@ class ModbusLine(threading.Thread):
 
         self._bands: Dict[str, Tuple[float, float]] = {}  # key -> (low_adj, high_adj)
 
+        self._io_lock = threading.RLock()  # единый лок на все транзакции порта
+        self._write_q: "queue.Queue[dict]" = queue.Queue()  # очередь задач записи
+
     # ───────────────────────── общая жизнедеятельность ─────────────────────────
     def stop(self):
         self._stop.set()
@@ -198,6 +214,54 @@ class ModbusLine(threading.Thread):
                     inst.serial.close()
             except Exception:
                 pass
+
+    def _do_write_task(self, t: dict) -> None:
+        """Выполнить одну задачу записи (владение портом под локом)."""
+        p: ParamCfg = t["param"]
+        unit_id: int = int(t["unit_id"])
+        num: float = float(t["value_num"])
+        inst = self._inst(unit_id)
+        if inst is None:
+            raise RuntimeError("serial not ready")
+
+        raw = int(round(num / _safe_scale(p.scale)))
+        addr = self._normalize_addr(p)
+
+        with self._io_lock:  # <<< ключевой момент: сериализация транзакций
+            if p.register_type == "coil":
+                inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
+            elif p.register_type == "holding":
+                inst.write_register(addr, raw, functioncode=6, signed=False)
+            else:
+                raise RuntimeError(f"write unsupported for type={p.register_type}")
+
+        # локально обновим last_values, чтобы on_change не спамил
+        key = self._make_key(unit_id, p.name)
+        now = _now_ms()
+        self._last_values[key] = num
+        self._last_ok_ts[key] = now
+        self._last_attempt_ts[key] = now
+        self._no_reply[unit_id] = 0
+        self._stats[(unit_id, "read_ok")] += 1  # условно считаем успешную операцию
+
+    def _drain_writes(self, max_tasks: int = 100) -> None:
+        """Быстро выгружаем очередь записей перед чтениями (приоритет управления)."""
+        n = 0
+        while n < max_tasks:
+            try:
+                t = self._write_q.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                self._do_write_task(t)
+            except Exception as e:
+                unit_id = t.get("unit_id")
+                p: ParamCfg = t.get("param")  # type: ignore
+                self.log.error(f"write error {unit_id}/{getattr(p, 'name', '?')}: {e}")
+                self._no_reply[unit_id] = self._no_reply.get(unit_id, 0) + 1
+            finally:
+                self._write_q.task_done()
+            n += 1
 
     # ───────────────────────── MQTT вспомогательные ────────────────────────────
     def _pub_topic_for(self, nd: NodeCfg, p: ParamCfg) -> str:
@@ -309,34 +373,22 @@ class ModbusLine(threading.Thread):
     def _make_write_handler(self, nd: NodeCfg, p: ParamCfg):
         def handler(value_str: str) -> bool:
             try:
-                inst = self._inst(nd.unit_id)
-                if inst is None:
-                    self.log.error("write: serial not ready")
-                    return False
                 try:
                     num = float(value_str)
                 except Exception:
                     num = 0.0
-                raw = int(round(num * _safe_scale(p.scale)))
-                addr = self._normalize_addr(p)
-
-                if p.register_type == "coil":
-                    inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
-                elif p.register_type == "holding":
-                    inst.write_register(addr, raw, functioncode=6, signed=False)
-                else:
-                    self.log.error(f"{p.name}: write unsupported for type={p.register_type}")
-                    return False
-
-                # локально обновим last_values, чтобы on_change не спамил
-                key = self._make_key(nd.unit_id, p.name)
-                self._last_values[key] = num
-                self._last_ok_ts[key] = _now_ms()
-                return True
+                # ставим задачу на запись; выполнит поток run()
+                self._write_q.put({
+                    "unit_id": nd.unit_id,
+                    "param": p,
+                    "value_num": num,
+                    "ts": time.time(),
+                })
+                return True  # приняли к исполнению
             except Exception as e:
-                self.log.error(f"write error {nd.unit_id}/{p.name}: {e}")
-                self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
+                self.log.error(f"enqueue write error {nd.unit_id}/{p.name}: {e}")
                 return False
+
         return handler
 
     # ───────────────────────── порт/инструмент ────────────────────────────────
@@ -515,7 +567,7 @@ class ModbusLine(threading.Thread):
 
             else:
                 return None, 10, "CONFIG_ERROR"
-            val = float(raw) / _safe_scale(p.scale)
+            val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
             if self.debug.get("log_reads"):
                 self.log.debug(f"read ok {p.register_type}[{addr}] raw={raw} -> {val}")
             return val, 0, "OK"
@@ -675,12 +727,12 @@ class ModbusLine(threading.Thread):
                 last_attempt_ts or now,
             )
 
-            # Если публикации не было — раз в N секунд «пульсируем» last_ok_ts в current_store
+            # Если публикации не было — раз в N секунд обновляем «текущие» значением (без публикации в брокер)
             if not did_publish and self.touch_read_every_s > 0:
                 last_touch = self._last_store_touch_ok.get(key, 0.0)
                 if (now - last_touch) >= self.touch_read_every_s:
                     try:
-                        current_store.touch_read(base_ctx, datetime.now(timezone.utc))
+                        current_store.apply_read(base_ctx, value, datetime.now(timezone.utc))
                     finally:
                         self._last_store_touch_ok[key] = now
             return
@@ -737,6 +789,10 @@ class ModbusLine(threading.Thread):
         summary_every = int(self.debug.get("summary_every_s", 0))
 
         while not self._stop.is_set():
+
+            # 0) приоритетно выполняем накопившиеся записи
+            self._drain_writes(max_tasks=100)
+
             loop_start = _now_ms()
             for nd in self.nodes:
                 inst = self._inst(nd.unit_id)
@@ -783,7 +839,7 @@ class ModbusLine(threading.Thread):
                             # успех блока
                             for i, p in enumerate(group_params):
                                 raw = block_vals[i]
-                                val = float(raw) / _safe_scale(p.scale)
+                                val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
                                 key = self._make_key(nd.unit_id, p.name)
                                 now = _now_ms()
                                 self._last_ok_ts[key] = now
@@ -818,6 +874,34 @@ class ModbusLine(threading.Thread):
                                 self._maybe_publish(nd, p, None, code, msg, self._last_ok_ts.get(key), now)
                             if self._no_reply[nd.unit_id] >= max_err:
                                 time.sleep(backoff_ms)
+                    # дочитываем параметры с words > 1 одиночными чтениями
+                    for p in (pp for pp in nd.params if int(getattr(pp, "words", 1) or 1) > 1):
+                        key = self._make_key(nd.unit_id, p.name)
+
+                        if self.debug.get("enabled"):
+                            fc = _func_code(p.register_type)
+                            addr_norm = self._normalize_addr(p)
+                            self.log.debug(
+                                f"REQ unit={nd.unit_id} fc={fc} type={p.register_type} "
+                                f"addr={addr_norm} (yaml={p.address}) [multi-word]"
+                            )
+
+                        val, code, msg = self._read_single(inst, p)
+                        now = _now_ms()
+                        self._last_attempt_ts[key] = now
+
+                        if val is None:
+                            self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
+                            self._stats[(nd.unit_id, "read_err")] += 1
+                            self._maybe_publish(nd, p, None, code, msg, self._last_ok_ts.get(key), now)
+                            if self._no_reply[nd.unit_id] >= max_err:
+                                time.sleep(backoff_ms)
+                        else:
+                            self._no_reply[nd.unit_id] = 0
+                            self._stats[(nd.unit_id, "read_ok")] += 1
+                            self._last_ok_ts[key] = now
+                            self._maybe_publish(nd, p, val, 0, "OK", self._last_ok_ts[key], now)
+
                     continue  # следующий узел
 
                 # Одиночные чтения (если batch выключен)
