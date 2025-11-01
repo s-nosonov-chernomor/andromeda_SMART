@@ -45,7 +45,7 @@ class ParamCfg:
     scale: float = 1.0
     mode: str = "r"                 # "r"|"rw"
     publish_mode: str = "on_change" # "on_change"|"interval"|"on_change_and_interval"|"both"
-    publish_interval_ms: int = 0
+    publish_interval_s: float = 0.0
     topic: Optional[str] = None     # относительный или абсолютный топик
     error_state: Optional[int] = None  # 0/1 или None
     display_error_text: Optional[str] = None
@@ -176,7 +176,17 @@ class ModbusLine(threading.Thread):
         # Узлы
         self.nodes: List[NodeCfg] = []
         for n in line_conf.get("nodes", []):
-            params = [ParamCfg(**p) for p in n.get("params", [])]
+            # params = [ParamCfg(**p) for p in n.get("params", [])]
+            params = []
+            for p in n.get("params", []):
+                # обратная совместимость: старое поле publish_interval_ms → секунды
+                if "publish_interval_ms" in p and "publish_interval_s" not in p:
+                    try:
+                        p["publish_interval_s"] = float(p["publish_interval_ms"]) / 1000.0
+                    except Exception:
+                        p["publish_interval_s"] = 0.0
+                params.append(ParamCfg(**p))
+
             self.nodes.append(NodeCfg(unit_id=int(n["unit_id"]), object=n["object"], params=params))
 
         total_params = sum(len(n.params) for n in self.nodes)
@@ -668,8 +678,10 @@ class ModbusLine(threading.Thread):
         last_pub = self._last_pub_ts.get(key, 0.0)
 
         mode = (p.publish_mode or "on_change").lower()
-        interval_ms = int(p.publish_interval_ms or 0)
-        due_interval = interval_ms > 0 and ((now - last_pub) * 1000.0 >= interval_ms)
+
+        interval_s = float(getattr(p, "publish_interval_s", 0) or 0)
+        due_interval = interval_s > 0 and ((now - last_pub) >= interval_s)
+
         # changed = (value is not None) and (last_val is None or value != last_val)
         if value is not None:
             step = float(p.step) if p.step not in (None, "") else 0.0

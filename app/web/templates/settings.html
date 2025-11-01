@@ -268,7 +268,7 @@
           <th>Scale</th>
           <th>Mode</th>
           <th>Publish</th>
-          <th>Interval, ms</th>
+          <th>Interval, s</th>
           <th>Topic</th>
           <th>Step</th>
           <th>Hysteresis</th>
@@ -340,7 +340,7 @@
       </div>
 
       <div>
-        <label class="label">publish_interval_ms</label>
+        <label class="label">publish_interval_s</label>
         <input id="m_pint" type="number" step="1" class="input" value="0" title="Интервал публикации (мс), если выбран режим по интервалу">
       </div>
       <div class="grid" style="grid-column: span 2;">
@@ -740,7 +740,7 @@
         <td class="mono">${escHtml(p.scale ?? 1)}</td>
         <td class="mono">${escHtml(p.mode)}</td>
         <td class="wrap">${escHtml(pm)}</td>
-        <td class="mono">${escHtml(p.publish_interval_ms ?? 0)}</td>
+        <td class="mono">${escHtml(p.publish_interval_s ?? 0)}</td>
         <td class="wrap">${escHtml(fmt(p.topic))}</td>
         <td class="mono">${p.step==null? '' : escHtml(p.step)}</td>
         <td class="mono">${p.hysteresis==null? '' : escHtml(p.hysteresis)}</td>
@@ -870,7 +870,7 @@
     qs('#m_scale').value = p.scale ?? 1;
     qs('#m_mode').value  = p.mode;
     qs('#m_pmode').value = p.publish_mode || 'on_change';
-    qs('#m_pint').value  = p.publish_interval_ms ?? 0;
+    qs('#m_pint').value  = p.publish_interval_s ?? 0;
     qs('#m_topic').value = p.topic || '';
     qs('#m_step').value = (p.step==null ? '' : p.step);
     qs('#m_hyst').value = (p.hysteresis==null ? '' : p.hysteresis);
@@ -895,7 +895,7 @@
       scale: +qs('#m_scale').value || 1.0,
       mode: qs('#m_mode').value,
       publish_mode: qs('#m_pmode').value,
-      publish_interval_ms: +qs('#m_pint').value || 0,
+      publish_interval_s: +qs('#m_pint').value || 0,
       topic: qs('#m_topic').value.trim() || null,
       step: (qs('#m_step').value===''? null : +qs('#m_step').value),
       hysteresis: (qs('#m_hyst').value===''? null : +qs('#m_hyst').value),

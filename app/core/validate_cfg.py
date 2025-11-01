@@ -229,7 +229,11 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
                 pm = str(p.get("publish_mode", "on_change")).strip()
                 if pm not in ALLOWED_PUBLISH_MODES:
                     raise ValueError(f"{name}/{unit_id}/{pname}: publish_mode должен быть {ALLOWED_PUBLISH_MODES}")
-                _as_int(p.get("publish_interval_ms", 0), f"{name}/{unit_id}/{pname}: publish_interval_ms", 0)
+
+                if "publish_interval_s" in p:
+                    _as_float(p.get("publish_interval_s", 0.0), f"{name}/{unit_id}/{pname}: publish_interval_s", 0.0)
+                elif "publish_interval_ms" in p:
+                    _as_int(p.get("publish_interval_ms", 0), f"{name}/{unit_id}/{pname}: publish_interval_ms", 0)
 
                 # error/mqttROM/text — как были
                 if "error_state" in p and p["error_state"] is not None:

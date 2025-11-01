@@ -1,0 +1,22 @@
+rules:
+  - id: "demo_overheat"
+    name: "Пример: перегрев в line1"
+    status: "enabled"
+    conditions:
+      all_of:
+        - tag: "line1.greenhouse1.temp"
+          op: ">="
+          operand: 35
+    actions:
+      - id: "a1"
+        type: "mqtt_publish"
+        mqtt:
+          topic: "persay/events/overheat"
+          payload:
+            msg: "greenhouse1 overheat"
+            level: "warn"
+      - id: "log1"
+        type: "log"
+        log:
+          message: "сработало правило demo_overheat"
+          level: "INFO"

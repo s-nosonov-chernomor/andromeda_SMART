@@ -19,6 +19,16 @@ from app.core.validate_cfg import validate_cfg
 # helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _migrate_param_ms_to_s(p: Dict[str, Any]) -> Dict[str, Any]:
+    p = dict(p or {})
+    if "publish_interval_ms" in p and "publish_interval_s" not in p:
+        try:
+            p["publish_interval_s"] = float(p["publish_interval_ms"]) / 1000.0
+        except Exception:
+            p["publish_interval_s"] = 0.0
+        p.pop("publish_interval_ms", None)
+    return p
+
 def _cfg() -> Dict[str, Any]:
     cfg = settings.get_cfg()
     if not isinstance(cfg, dict):
@@ -98,7 +108,7 @@ class ParamDTO(BaseModel):
     scale: Optional[float] = 1.0
     mode: str = "r"
     publish_mode: Optional[str] = "on_change"
-    publish_interval_ms: Optional[int] = 0
+    publish_interval_s: Optional[float] = 0
     topic: Optional[str] = None
     step: Optional[float] = None
     hysteresis: Optional[float] = None
@@ -206,7 +216,17 @@ def put_general(body: Dict[str, Any]):
 
 @router.get("/lines")
 def get_lines():
-    return _cfg().get("lines", [])
+    cfg = _cfg()
+    out = []
+    for ln in (cfg.get("lines") or []):
+        ln2 = copy.deepcopy(ln)
+        for nd in (ln2.get("nodes") or []):
+            for p in (nd.get("params") or []):
+                mp = _migrate_param_ms_to_s(p)
+                p.clear(); p.update(mp)
+        out.append(ln2)
+    return out
+
 
 @router.post("/line/add")
 def add_line(payload: Dict[str, Any]):
@@ -391,6 +411,7 @@ def add_param(payload: Dict[str, Any]):
     unit_id   = payload.get("unit_id")
     object_   = payload.get("object")
     param     = payload.get("param")
+    param = _migrate_param_ms_to_s(param)
     if not line_name or unit_id is None or not object_ or not isinstance(param, dict):
         raise HTTPException(400, "Bad payload")
 
@@ -422,6 +443,7 @@ def update_param(body: Dict[str, Any]):
     unit_id   = body.get("unit_id")
     name      = body.get("name")
     updates   = body.get("updates")
+    updates = _migrate_param_ms_to_s(updates)
     if not line_name or unit_id is None or not name or not isinstance(updates, dict):
         raise HTTPException(400, "Bad payload")
 
@@ -492,7 +514,7 @@ def export_params_xlsx():
     headers = [
         "Линия","Unit","Параметр","Тип","Адрес",
         "Words","DataType","WordOrder",
-        "Scale","Mode","Publish","Interval, ms","Topic",
+        "Scale","Mode","Publish","Interval, s","Topic",
         "Step","Hysteresis",
     ]
     ws.append(headers)
@@ -514,7 +536,7 @@ def export_params_xlsx():
                     p.get("scale", 1.0),
                     p.get("mode","r"),
                     p.get("publish_mode","on_change"),
-                    p.get("publish_interval_ms", 0),
+                    p.get("publish_interval_s", 0),
                     p.get("topic") or "",
                     p.get("step", None),
                     p.get("hysteresis", None),
@@ -585,7 +607,7 @@ async def import_params_xlsx(file: UploadFile = File(...)):
         scale    = cv("Scale", float, 1.0)
         mode     = str(cv("Mode", str, "r")).strip()
         pmode    = str(cv("Publish", str, "on_change")).strip()
-        pint     = cv("Interval, ms", int, 0)
+        pint_s = cv("Interval, s", float, 0.0)
         topic    = str(cv("Topic", str, "")).strip() or None
 
         step = cv("Step", float, None)
@@ -632,7 +654,7 @@ async def import_params_xlsx(file: UploadFile = File(...)):
             "scale": float(scale or 1.0),
             "mode": mode,
             "publish_mode": pmode,
-            "publish_interval_ms": int(pint or 0),
+            "publish_interval_s": float(pint_s or 0.0),
             "topic": topic
         }
         if step is not None: param["step"] = step

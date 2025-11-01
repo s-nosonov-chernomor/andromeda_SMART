@@ -55,163 +55,39 @@ lines:
   nodes:
   - unit_id: 44
     params:
-    - name: q1
+    - name: первый канал
+      register_type: coil
+      address: 1000
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      topic: null
+      step: null
+      hysteresis: null
+      publish_interval_s: 20
+    - name: второй параметр
       register_type: coil
       address: 1001
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1.0
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 5000
-      topic: site1/room2/io/q1
-      error_state: 0
-      display_error_text: Что-то не так работает как надо
-      mqttROM: Chnl1
-    - name: q81
-      register_type: coil
-      address: 1002
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1.0
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 5000
-      topic: site1/room2/io/q3
-      error_state: 1
-      display_error_text: Снова где то кто то что-то не так сделал походу
-      mqttROM: Chnl4
-    object: object1_io2
-    num_object: 1
-  - unit_id: 29
-    params: []
-    object: rele2
-    num_object: 2
-  - unit_id: 224
-    params:
-    - name: время работы
-      register_type: holding
-      address: 110
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1.0
-      mode: rw
-      publish_mode: on_change
-      publish_interval_ms: 5000
-      topic: null
-      error_state: 1
-    - name: Ток_7
-      register_type: input
-      address: 4373
-      words: 1
-      data_type: s16
-      word_order: AB
       scale: 1
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 60000
-      topic: null
-      step: 10
-      hysteresis: 1
-    - name: Активная мощность для фазы L1
-      register_type: input
-      address: 4866
-      words: 2
-      data_type: s32
-      word_order: AB
-      scale: 0.00512
       mode: r
       publish_mode: on_change_and_interval
-      publish_interval_ms: 60000
-      topic: null
-      step: 50
-      hysteresis: 5
-    object: счетчик
-  - unit_id: 101
-    params: []
-    object: счетчик
-  - unit_id: 79
-    params:
-    - name: МощностьК1
-      register_type: input
-      address: 64
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 3600000
-      topic: null
-      mqttROM: мощи
-      step: 100
-      hysteresis: 20
-    - name: contact1
-      register_type: coil
-      address: 0
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: rw
-      publish_mode: on_change
-      publish_interval_ms: 60000
+      publish_interval_s: 10
       topic: null
       step: null
       hysteresis: null
-    - name: contakt_2
-      register_type: coil
-      address: 1
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: rw
-      publish_mode: on_change
-      publish_interval_ms: 60000
-      topic: null
-      step: null
-      hysteresis: null
-    object: RELE_1
-    num_object: 5
-  - unit_id: 43
-    object: мио 5
+    object: unit11
+    num_object: null
+  - unit_id: 224
     params: []
-    num_object: 4
-  - unit_id: 98
-    object: мио 6
-    params: []
-    num_object: 6
+    object: unit180
+    num_object: null
   - unit_id: 148
-    object: реле на 6 входов
-    params:
-    - name: скорость
-      register_type: holding
-      address: 110
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 60000
-      topic: null
-      step: null
-      hysteresis: null
-    - name: МощА_1
-      register_type: input
-      address: 4870
-      words: 2
-      data_type: s32
-      word_order: AB
-      scale: 2
-      mode: r
-      publish_mode: on_change
-      publish_interval_ms: 60000
-      topic: null
-      step: null
-      hysteresis: null
-    num_object: 17
+    params: []
+    object: unit198
+    num_object: null
