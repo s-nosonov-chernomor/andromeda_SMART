@@ -17,6 +17,9 @@ import serial
 import math, struct
 import queue
 
+from pymodbus.client import ModbusTcpClient
+from pymodbus.exceptions import ModbusException
+
 
 try:
     # RS485 режим доступен не везде — используем опционально
@@ -118,17 +121,35 @@ class ModbusLine(threading.Thread):
         :param poll_conf: секция polling из YAML
         """
         super().__init__(daemon=True)
+
         self.name_ = line_conf.get("name") or f"line_{id(self)}"
         self.log = logging.getLogger(f"line.{self.name_}")
 
-        # Аппаратные параметры порта
-        self.port = line_conf["device"]
-        self.baudrate = int(line_conf.get("baudrate", 9600))
-        self.timeout = float(line_conf.get("timeout", 0.1))
-        self.parity = str(line_conf.get("parity", "N")).upper()
-        self.stopbits = int(line_conf.get("stopbits", 1))
-        self.rs485_toggle = bool(line_conf.get("rs485_rts_toggle", False))
+        # Тип транспорта: RTU по COM или Modbus TCP
+        self.transport = str(line_conf.get("transport", "rtu")).lower()
+
+        if self.transport == "tcp":
+            # Параметры Modbus TCP
+            self.host = line_conf["host"]
+            self.tcp_port = int(line_conf.get("port", 23))
+            self.timeout = float(line_conf.get("timeout", 1.0))
+            self.port = f"{self.host}:{self.tcp_port}"  # только для логов
+            # Для TCP эти поля по сути не используются, но оставим заглушки
+            self.baudrate = None
+            self.parity = "N"
+            self.stopbits = 1
+            self.rs485_toggle = False
+        else:
+            # Аппаратные параметры порта (RTU по COM)
+            self.port = line_conf["device"]
+            self.baudrate = int(line_conf.get("baudrate", 115200))
+            self.timeout = float(line_conf.get("timeout", 0.1))
+            self.parity = str(line_conf.get("parity", "N")).upper()
+            self.stopbits = int(line_conf.get("stopbits", 1))
+            self.rs485_toggle = bool(line_conf.get("rs485_rts_toggle", False))
+
         self.serial_echo = bool(serial_echo)
+
 
         # Переоткрытие порта / бэкофф
         self._port_fault = False
@@ -197,6 +218,9 @@ class ModbusLine(threading.Thread):
 
         # Runtime состояние
         self._instruments: Dict[int, minimalmodbus.Instrument] = {}
+        self._tcp_client: Optional[ModbusTcpClient] = None   # для TCP
+        self._current_unit_id: Optional[int] = None          # для TCP-операций
+
         self._last_values: Dict[str, float] = {}      # key = f"{unit}:{param}"
         self._last_pub_ts: Dict[str, float] = {}      # последний publish (для interval)
         self._last_ok_ts: Dict[str, float] = {}       # последний успешный read
@@ -215,15 +239,27 @@ class ModbusLine(threading.Thread):
         self._io_lock = threading.RLock()  # единый лок на все транзакции порта
         self._write_q: "queue.Queue[dict]" = queue.Queue()  # очередь задач записи
 
+        # Для TCP пока отключим batch-read, будем читать по одному параметру
+        if self.transport == "tcp":
+            self.batch_enabled = False
+
     # ───────────────────────── общая жизнедеятельность ─────────────────────────
     def stop(self):
         self._stop.set()
+        # RTU-инструменты
         for inst in self._instruments.values():
             try:
                 if getattr(inst, "serial", None):
                     inst.serial.close()
             except Exception:
                 pass
+        # TCP-клиент
+        if self._tcp_client is not None:
+            try:
+                self._tcp_client.close()
+            except Exception:
+                pass
+
 
     def _do_write_task(self, t: dict) -> None:
         """Выполнить одну задачу записи (владение портом под локом)."""
@@ -238,12 +274,33 @@ class ModbusLine(threading.Thread):
         addr = self._normalize_addr(p)
 
         with self._io_lock:  # <<< ключевой момент: сериализация транзакций
-            if p.register_type == "coil":
-                inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
-            elif p.register_type == "holding":
-                inst.write_register(addr, raw, functioncode=6, signed=False)
+            if self.transport == "tcp":
+                # Modbus TCP
+                if p.register_type == "coil":
+                    r = inst.write_coil(
+                        address=addr,
+                        value=1 if raw != 0 else 0,
+                        device_id=unit_id,
+                    )
+                elif p.register_type == "holding":
+                    r = inst.write_register(
+                        address=addr,
+                        value=raw,
+                        device_id=unit_id,
+                    )
+                else:
+                    raise RuntimeError(f"write unsupported for type={p.register_type}")
+                if hasattr(r, "isError") and r.isError():
+                    raise ModbusException(r)
             else:
-                raise RuntimeError(f"write unsupported for type={p.register_type}")
+                # RTU / minimalmodbus
+                if p.register_type == "coil":
+                    inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
+                elif p.register_type == "holding":
+                    inst.write_register(addr, raw, functioncode=6, signed=False)
+                else:
+                    raise RuntimeError(f"write unsupported for type={p.register_type}")
+
 
         # локально обновим last_values, чтобы on_change не спамил
         key = self._make_key(unit_id, p.name)
@@ -459,11 +516,37 @@ class ModbusLine(threading.Thread):
             return True
         return False
 
-    def _inst(self, unit_id: int) -> Optional[minimalmodbus.Instrument]:
+    def _inst(self, unit_id: int):
         now = _now_ms()
         if self._port_fault and now < self._port_retry_at:
             return None
 
+        # ───────────── Modbus TCP ─────────────
+        if self.transport == "tcp":
+            if self._tcp_client is None:
+                try:
+                    cli = ModbusTcpClient(
+                        host=self.host,
+                        port=self.tcp_port,
+                        timeout=self.timeout,
+                    )
+                    if not cli.connect():
+                        raise ConnectionError("Modbus TCP connect() failed")
+                    self._tcp_client = cli
+                    if self._port_fault:
+                        self.log.info(f"TCP {self.host}:{self.tcp_port} reconnected")
+                    self._port_fault = False
+                except Exception as e:
+                    self._port_fault = True
+                    self._port_retry_at = now + self._port_retry_backoff
+                    self.log.error(
+                        f"Modbus TCP connect error {self.host}:{self.tcp_port}: {e}. "
+                        f"retry in {self._port_retry_backoff:.1f}s"
+                    )
+                    return None
+            return self._tcp_client
+
+        # ───────────── RTU по COM (как было) ─────────────
         inst = self._instruments.get(unit_id)
         if inst:
             return inst
@@ -504,7 +587,6 @@ class ModbusLine(threading.Thread):
                 except Exception:
                     pass
 
-
             if self.rs485_toggle and RS485Settings is not None:
                 try:
                     inst.serial.rs485_mode = RS485Settings(
@@ -535,6 +617,7 @@ class ModbusLine(threading.Thread):
             self.log.error(f"port open error {self.port}: {e}. retry in {self._port_retry_backoff:.1f}s")
             return None
 
+
     # ───────────────────────── адреса и нормализация ──────────────────────────
     def _normalize_addr(self, p: ParamCfg) -> int:
         """В debug.enabled нормализуем 40001/30001 и 1-based coils/discretes."""
@@ -558,8 +641,73 @@ class ModbusLine(threading.Thread):
         return f"{unit_id}:{param_name}"
 
     # ───────────────────────── чтение: одиночное/блочное ──────────────────────
-    def _read_single(self, inst: minimalmodbus.Instrument, p: ParamCfg) -> Tuple[Optional[float], int, str]:
+    def _read_single(self, inst, p: ParamCfg) -> Tuple[Optional[float], int, str]:
         addr = self._normalize_addr(p)
+
+        # ───────────── TCP ─────────────
+        if self.transport == "tcp":
+            unit_id = int(self._current_unit_id or 0)
+            try:
+                if p.register_type == "coil":
+                    resp = inst.read_coils(
+                        address=addr,
+                        count=1,
+                        device_id=unit_id,
+                    )
+                    if resp.isError():
+                        raise ModbusException(resp)
+                    raw = int(bool(resp.bits[0]))
+
+                elif p.register_type == "discrete":
+                    resp = inst.read_discrete_inputs(
+                        address=addr,
+                        count=1,
+                        device_id=unit_id,
+                    )
+                    if resp.isError():
+                        raise ModbusException(resp)
+                    raw = int(bool(resp.bits[0]))
+
+                elif p.register_type in ("holding", "input"):
+                    words = max(1, int(p.words or 1))
+                    if p.register_type == "holding":
+                        resp = inst.read_holding_registers(
+                            address=addr,
+                            count=words,
+                            device_id=unit_id,
+                        )
+                    else:
+                        resp = inst.read_input_registers(
+                            address=addr,
+                            count=words,
+                            device_id=unit_id,
+                        )
+                    if resp.isError():
+                        raise ModbusException(resp)
+                    regs = list(resp.registers)
+
+                    if (p.words <= 1) and (p.data_type in ("u16", "s16")):
+                        raw = regs[0]
+                        if p.data_type == "s16" and (raw & 0x8000):
+                            raw = raw - 0x10000
+                    else:
+                        raw = self._decode_words(regs, p.data_type or "u16", p.word_order or "AB")
+
+                else:
+                    return None, 10, "CONFIG_ERROR"
+
+                val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
+                if self.debug.get("log_reads"):
+                    self.log.debug(f"TCP read ok {p.register_type}[{addr}] raw={raw} -> {val}")
+                return val, 0, "OK"
+
+            except Exception as e:
+                code, msg = self._map_ex(e)
+                if self.debug.get("enabled"):
+                    self.log.error(f"{p.name}: TCP read error at {p.register_type}[{addr}] → {e}")
+                return None, code, msg
+
+        # ───────────── RTU (как было) ─────────────
         try:
             if p.register_type == "coil":
                 raw = inst.read_bit(addr, functioncode=1)
@@ -570,13 +718,12 @@ class ModbusLine(threading.Thread):
                 # 16-битные — как раньше
                 if (p.words <= 1) and (p.data_type in ("u16", "s16")):
                     raw = inst.read_register(addr, functioncode=fc, signed=(p.data_type == "s16"))
-
                 else:
                     regs = inst.read_registers(addr, max(1, int(p.words or 2)), functioncode=fc)
                     raw = self._decode_words(regs, p.data_type or "u16", p.word_order or "AB")
-
             else:
                 return None, 10, "CONFIG_ERROR"
+
             val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
             if self.debug.get("log_reads"):
                 self.log.debug(f"read ok {p.register_type}[{addr}] raw={raw} -> {val}")
@@ -807,6 +954,9 @@ class ModbusLine(threading.Thread):
 
             loop_start = _now_ms()
             for nd in self.nodes:
+                # Запомним текущий unit_id для TCP-операций
+                self._current_unit_id = nd.unit_id
+
                 inst = self._inst(nd.unit_id)
                 if inst is None:
                     self._stats[(nd.unit_id, "read_err")] += 1
@@ -814,6 +964,12 @@ class ModbusLine(threading.Thread):
 
                 # Batch-read (если включено)
                 if self.batch_enabled:
+                    if self.transport != "tcp" and self.serial_echo:
+                        try:
+                            inst.serial.reset_input_buffer()
+                        except Exception:
+                            pass
+
                     blocks = self._group_sequential(nd.params)
                     if self.serial_echo:
                         try:
@@ -917,6 +1073,11 @@ class ModbusLine(threading.Thread):
                     continue  # следующий узел
 
                 # Одиночные чтения (если batch выключен)
+                if self.transport != "tcp" and self.serial_echo:
+                    try:
+                        inst.serial.reset_input_buffer()
+                    except Exception:
+                        pass
                 if self.serial_echo:
                     try:
                         inst.serial.reset_input_buffer()

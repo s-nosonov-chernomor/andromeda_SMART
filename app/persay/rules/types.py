@@ -177,6 +177,29 @@ class ActionResult:
 
 
 # === 5. ПРАВИЛО =============================================================
+@dataclass
+class RuleStats:
+    fire_count: int = 0
+    last_fired_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    # новое поле: в каком состоянии было условие в прошлый раз
+    last_condition_state: Optional[bool] = None
+
+@dataclass
+class RuleOptions:
+    """
+    Доп. опции поведения правила.
+
+    fire_mode:
+      - "edge"  — стрелять только по фронту (False/None -> True)
+      - "level" — стрелять каждый раз, пока условие True
+
+    min_interval_sec:
+      - минимальный интервал между срабатываниями (cooldown).
+        None или 0 → без ограничения.
+    """
+    fire_mode: str = "edge"
+    min_interval_sec: Optional[float] = None
 
 @dataclass
 class Rule:
@@ -190,6 +213,10 @@ class Rule:
     # (например, для публикации состояния этого правила)
     virtual_tags: List[str] = field(default_factory=list)
     description: Optional[str] = None
+    stats: RuleStats = field(default_factory=RuleStats)
+    # Новые опции работы правила (режим срабатывания, интервалы и т.п.)
+    options: RuleOptions = field(default_factory=RuleOptions)
+
 
 
 # === 6. ЖУРНАЛ ДЕЙСТВИЙ ======================================================

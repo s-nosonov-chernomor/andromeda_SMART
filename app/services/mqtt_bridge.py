@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.services.current_store import current_store  # ← ДОБАВИЛИ
 from app.services.alerts_runtime import engine_instance
 
+from app.persay.runtime import notify_tag_update
+
 
 import logging
 
@@ -277,6 +279,31 @@ class MqttBridge:
                         )
                 except Exception as e:
                     log.error(f"[alerts] notify_publish error: {e}")
+
+                # ——— НОВОЕ: отдать публикацию в движок АВТОМАТИЗАЦИИ (persay) ———
+                try:
+                    param_name = ctx.get("param") or ""
+                    if param_name:
+                        # значение берём из payload["value"] (там строка или None)
+                        val = payload.get("value", None)
+
+                        notify_tag_update(
+                            name=param_name,      # <<< только имя параметра, например "мощ1"
+                            value=val,
+                            source="mqtt",
+                            meta={
+                                "object": ctx.get("object", ""),
+                                "line": ctx.get("line", ""),
+                                "unit_id": ctx.get("unit_id", 0),
+                                "register_type": ctx.get("register_type", ""),
+                                "address": ctx.get("address", 0),
+                                "topic": topic,
+                            },
+                        )
+                except Exception as e:
+                    log.error(f"[automation] notify_tag_update error: {e}")
+
+
 
             except Exception as e:
                 log.error(f"publish error: {e}")

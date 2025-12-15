@@ -4,8 +4,8 @@ from paho.mqtt import client as mqtt_client
 # Настройки подключения
 broker = '127.0.0.1'  # Адрес брокера
 port = 1883  # Порт для подключения
-topic = "/devices/rele2/controls/реле1/on"  # Топик, в который отправляем сообщение
-message_to_send = "{value: 1}"  # Сообщение для отправки
+topic = "/devices/unit180/controls/реле4/on"  # Топик, в который отправляем сообщение
+message_to_send = '{"value": 0}'  # Сообщение для отправки {value: 1}
 
 # Генерируем случайный ID клиента
 client_id = f'python-mqtt-{random.randint(0, 1000)}'

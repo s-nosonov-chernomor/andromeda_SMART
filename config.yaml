@@ -53,41 +53,85 @@ lines:
   port_retry_backoff_s: 1
   rs485_rts_toggle: false
   nodes:
-  - unit_id: 44
-    params:
-    - name: первый канал
-      register_type: coil
-      address: 1000
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: r
-      publish_mode: on_change_and_interval
-      topic: null
-      step: null
-      hysteresis: null
-      publish_interval_s: 20
-    - name: второй параметр
-      register_type: coil
-      address: 1001
-      words: 1
-      data_type: u16
-      word_order: AB
-      scale: 1
-      mode: r
-      publish_mode: on_change_and_interval
-      publish_interval_s: 10
-      topic: null
-      step: null
-      hysteresis: null
-    object: unit11
-    num_object: null
   - unit_id: 224
-    params: []
+    params:
+    - name: реле1
+      register_type: coil
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: null
+      hysteresis: null
+    - name: реле2
+      register_type: coil
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: null
+      hysteresis: null
+    - name: реле3
+      register_type: coil
+      address: 2
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: null
+      hysteresis: null
+    - name: реле4
+      register_type: coil
+      address: 3
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: null
+      hysteresis: null
+    - name: реле5
+      register_type: coil
+      address: 4
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: 1
+      hysteresis: 1
+    - name: реле6
+      register_type: coil
+      address: 5
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 100
+      topic: null
+      step: null
+      hysteresis: null
     object: unit180
-    num_object: null
-  - unit_id: 148
-    params: []
-    object: unit198
     num_object: null

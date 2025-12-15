@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from threading import RLock
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Set  # Set уже у тебя есть
 
 from .types import (
     TagValue,
@@ -11,11 +11,16 @@ from .types import (
     ActionLogEntry,
     ActionStatus,
     ActionType,
+    ActionResult,
+    RuleStats,
 )
 from .evaluator import ConditionEvaluator
 from .actions import ActionExecutor
 from .virtual_tags import VirtualTagRegistry, VirtualTag
 from .storage import RulesRepository
+
+import logging
+log = logging.getLogger("automation")
 
 
 class RuleEngine:
@@ -62,6 +67,28 @@ class RuleEngine:
     # ------------------------------------------------------------------ #
     # ПУБЛИЧНЫЙ API
     # ------------------------------------------------------------------ #
+    def _extract_condition_tags(self, rule: Rule) -> Set[str]:
+        """
+        Собирает множество имён тегов, которые используются в условиях правила.
+        Нужно, чтобы не гонять правило на каждое изменение любого тега.
+        """
+        tags: Set[str] = set()
+        cond_group = getattr(rule, "conditions", None)
+        if not cond_group:
+            return tags
+
+        for item in getattr(cond_group, "all_of", []) or []:
+            tag = getattr(item, "tag", None)
+            if tag:
+                tags.add(tag)
+
+        for item in getattr(cond_group, "any_of", []) or []:
+            tag = getattr(item, "tag", None)
+            if tag:
+                tags.add(tag)
+
+        return tags
+
     def handle_tag_update(
         self,
         tag_value: TagValue,
@@ -82,28 +109,149 @@ class RuleEngine:
             # построим карту значений тегов для проверок
             eval_tag_map = self._build_eval_tag_map()
 
+        # ЛОГ: что за тег пришёл
+        try:
+            log.debug(
+                "tag_update: %s = %r (source=%s)",
+                tag_value.name,
+                tag_value.value,
+                getattr(tag_value.source, "value", tag_value.source)
+            )
+        except Exception:
+            pass
+
+        # Для отладки: покажем, что знаем по основным реле
+        for tname in ("реле1", "реле2", "реле3", "реле4", "реле5", "реле6"):
+            tv = eval_tag_map.get(tname)
+            if tv is None:
+                log.debug("eval_map[%s]: <no value>", tname)
+            else:
+                log.debug(
+                    "eval_map[%s]: value=%r ts=%s",
+                    tname,
+                    tv.value,
+                    tv.ts.isoformat() if isinstance(tv.ts, datetime) else tv.ts,
+                )
+
         # вне lock — прогоняем правила
         for rule in rules:
+            # 0) смотрим, от каких тегов зависит правило
+            cond_tags = self._extract_condition_tags(rule)
+
+            # если правило вообще не зависит ни от каких тегов – оно не должно
+            # срабатывать на tag_update (только через trigger_rule)
+            if not cond_tags:
+                log.debug(
+                    "rule %s (%s): skip on tag_update (no cond_tags)",
+                    rule.id,
+                    rule.name,
+                )
+                continue
+
+            # если правило зависит от конкретных тегов, а изменился другой – пропускаем
+            if tag_value.name not in cond_tags:
+                log.debug(
+                    "rule %s (%s): skip for tag %s (cond_tags=%s)",
+                    rule.id,
+                    rule.name,
+                    tag_value.name,
+                    cond_tags,
+                )
+                continue
+
             # если правило объявило виртуальные теги — убедимся, что они есть
             self._ensure_rule_virtual_tags(rule)
 
             # проверяем условия
             ok = self._evaluator.evaluate_group(rule.conditions, eval_tag_map)
-            if not ok:
-                continue
 
-            # условия выполнены → запускаем ветку действий
-            # контекст дополним источником
+            log.debug(
+                "rule %s (%s): %s",
+                rule.id,
+                rule.name,
+                "OK" if ok else "NO"
+            )
+
+            # --- ИНИЦИАЛИЗАЦИЯ stats, если нужно ---
+            if getattr(rule, "stats", None) is None:
+                rule.stats = RuleStats()
+
+            # --- Читаем опции ---
+            options = getattr(rule, "options", None)
+            fire_mode = getattr(options, "fire_mode", "edge") if options is not None else "edge"
+            min_interval_sec = getattr(options, "min_interval_sec", None) if options is not None else None
+
+            prev_state = getattr(rule.stats, "last_condition_state", None)
+
+            # --- РЕЖИМ fire_mode=edge: стрелять только по фронту ---
+            if fire_mode == "edge":
+                if not ok:
+                    # условие не выполнено → просто фиксируем состояние и идём дальше
+                    rule.stats.last_condition_state = False
+                    continue
+
+                # ok == True
+                if prev_state is True:
+                    # условие уже было True ранее → не считаем это новым фронтом
+                    rule.stats.last_condition_state = True
+                    log.debug(
+                        "rule %s (%s): condition still True, suppressed in edge mode",
+                        rule.id,
+                        rule.name,
+                    )
+                    continue
+
+                # сюда попадаем, когда prev_state is not True (None/False) и ok=True
+                # это как раз фронт
+            else:
+                # fire_mode != edge (например, "level"):
+                # если условие False — просто обновим состояние и не стрелять
+                if not ok:
+                    rule.stats.last_condition_state = False
+                    continue
+                # ok=True — дальше пойдём к проверке cooldown
+
+            # --- COOLDOWN по min_interval_sec ---
+            if ok and min_interval_sec and min_interval_sec > 0:
+                now = datetime.utcnow()
+                last = rule.stats.last_fired_at
+                if last is not None:
+                    dt = (now - last).total_seconds()
+                    if dt < float(min_interval_sec):
+                        # слишком рано, ещё не вышел интервал
+                        rule.stats.last_condition_state = True
+                        log.debug(
+                            "rule %s (%s): suppressed by cooldown (%.3fs elapsed, need %.3fs)",
+                            rule.id,
+                            rule.name,
+                            dt,
+                            float(min_interval_sec),
+                        )
+                        continue
+
+            # если мы сюда дошли — правило реально будет стрелять
+            rule.stats.last_condition_state = ok
+
+            # контекст
             rule_ctx = {"source_tag": tag_value.name}
             if context:
                 rule_ctx.update(context)
 
-            self._actions.execute_actions(
+            log.info(
+                "rule %s (%s) FIRED by tag %s",
+                rule.id,
+                rule.name,
+                tag_value.name,
+            )
+
+            results = self._actions.execute_actions(
                 rule,
                 rule.actions,
                 sequential=True,
                 context=rule_ctx,
             )
+            self._update_rule_stats(rule, results)
+
 
     def trigger_rule(
         self,
@@ -126,17 +274,36 @@ class RuleEngine:
         # создадим объявленные виртуальные теги
         self._ensure_rule_virtual_tags(rule)
 
-        self._actions.execute_actions(
+        results = self._actions.execute_actions(
             rule,
             rule.actions,
             sequential=True,
             context=context or {},
         )
+        self._update_rule_stats(rule, results)
 
     def get_tag_value(self, name: str) -> Optional[TagValue]:
         """Можно будет запросить актуальное значение тега у движка."""
         with self._lock:
             return self._tag_values.get(name)
+
+    def _update_rule_stats(self, rule: Rule, results: List[ActionResult]) -> None:
+        """
+        Обновить счётчик срабатываний и время/ошибку по результатам выполнения действий.
+        """
+        # на всякий случай: вдруг stats не инициализирован
+        if getattr(rule, "stats", None) is None:
+            rule.stats = RuleStats()
+
+        rule.stats.fire_count += 1
+        rule.stats.last_fired_at = datetime.utcnow()
+
+        # если какие-то действия упали — возьмём первую ошибку
+        errs = [r.error for r in results if r.error]
+        if errs:
+            rule.stats.last_error = errs[0]
+        else:
+            rule.stats.last_error = None
 
     # ------------------------------------------------------------------ #
     # ВНУТРЕННЕЕ

@@ -27,6 +27,11 @@ from app.persay.rules.types import (
     LogPayload,
 )
 
+from datetime import datetime
+from typing import Any, Dict, Optional
+from app.persay.rules.types import TagValue, TagSource  # ← у нас уже есть types.py
+
+
 # сюда мы потом положим живую ссылку
 _automation_ctx: "AutomationContext | None" = None
 
@@ -195,3 +200,61 @@ def _rules_from_dict(data: Dict[str, Any]) -> List[Rule]:
         out.append(rule)
 
     return out
+
+def _make_tag_name_from_ctx(ctx: Dict[str, Any]) -> str:
+    """
+    Придумываем единый нейминг тега из того, что у нас есть в контексте.
+    Приоритет:
+      1) object + param → object.param
+      2) line + unit_id + param → line.<unit>.param
+      3) просто param
+    """
+    obj = (ctx.get("object") or "").strip()
+    param = (ctx.get("param") or "").strip()
+    line = (ctx.get("line") or "").strip()
+    unit_id = ctx.get("unit_id")
+
+    if obj and param:
+        return f"{obj}.{param}"
+    if line and unit_id is not None and param:
+        return f"{line}.{unit_id}.{param}"
+    if param:
+        return param
+    # крайний случай — чтобы движок не упал
+    return "unknown"
+
+
+def handle_publish_from_mqtt(ctx: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    """
+    Вызываем это из mqtt_bridge, когда у нас появилось новое опубликованное значение.
+    Преобразуем в TagValue и отдаём в RuleEngine.
+    """
+    auto = get_automation()
+    if auto is None:
+        return
+
+    name = _make_tag_name_from_ctx(ctx)
+
+    # значение из payload
+    value = payload.get("value", None)
+
+    # время
+    ts_iso = (payload.get("metadata") or {}).get("timestamp")
+    if ts_iso:
+        try:
+            ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+        except Exception:
+            ts = datetime.utcnow()
+    else:
+        ts = datetime.utcnow()
+
+    tv = TagValue(
+        name=name,
+        value=value,
+        ts=ts,
+        source=TagSource.MQTT,
+        meta=dict(ctx),
+    )
+
+    # контекст тоже передадим (там line, unit_id, trigger и т.п.)
+    auto.engine.handle_tag_update(tv, context=ctx)

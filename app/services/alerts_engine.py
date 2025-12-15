@@ -8,6 +8,8 @@ import time
 import threading
 import logging
 import requests
+import paho.mqtt.client as mqtt
+
 
 try:
     import certifi
@@ -102,6 +104,8 @@ class FlowParam:
     ok_text: str = "OK"
     alarm_text: str = "ALARM"
 
+    tag: str = ""  # "A+0", "R-1" и т.п.
+
     def key(self) -> ParamKey:
         return (self.line, int(self.unit_id), self.name)
 
@@ -184,25 +188,72 @@ class TelegramSender(Sender):
             self.log.exception("telegram send failed: %s", e)
             return False
 
-
 class RonetSender(Sender):
-    def send(self, flow: FlowCfg, text: str) -> None:
-        # Заглушка: предполагаем HTTP endpoint + api_key.
+    """
+    Отправляет уже сформированный JSON (строкой) во внешний MQTT брокер.
+    """
+    def __init__(self, timeout: int = 10):
+        self.timeout = timeout
+        self.log = logging.getLogger("alerts.ronet")
+        self._lock = threading.RLock()
+        self._clients: dict[str, mqtt.Client] = {}  # cache by (host|port|client_id|user)
+
+    def _client_key(self, host: str, port: int, client_id: str, username: str) -> str:
+        return f"{host}|{port}|{client_id}|{username}"
+
+    def _get_or_create_client(self, host: str, port: int, client_id: str, username: str, password: str) -> mqtt.Client:
+        key = self._client_key(host, port, client_id, username)
+        with self._lock:
+            c = self._clients.get(key)
+            if c:
+                return c
+
+            c = mqtt.Client(
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                client_id=client_id,
+                protocol=mqtt.MQTTv311,
+            )
+            if username:
+                c.username_pw_set(username, password or "")
+
+            # подключаемся синхронно (быстро) + loop_start
+            try:
+                c.connect(host, int(port), keepalive=30)
+                c.loop_start()
+            except Exception as e:
+                self.log.error("ronet mqtt connect failed: %s", e)
+
+            self._clients[key] = c
+            return c
+
+    def send_json(self, flow: FlowCfg, payload_json: str) -> bool:
         rn = flow.ronet or {}
-        endpoint = rn.get("endpoint")
-        api_key  = rn.get("api_key")
-        if not endpoint:
-            return
-        payload = json.dumps({"text": text}).encode("utf-8")
-        req = urllib.request.Request(endpoint, data=payload, method="POST")
-        req.add_header("Content-Type", "application/json")
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
+
+        host = str(rn.get("broker_host", "") or "").strip()
+        port = int(rn.get("broker_port", 1883) or 1883)
+        topic = str(rn.get("topic", "") or "").strip()
+        qos = int(rn.get("qos", 0) or 0)
+        retain = bool(rn.get("retain", False))
+
+        username = str(rn.get("username", "") or "")
+        password = str(rn.get("password", "") or "")
+        client_id = str(rn.get("client_id", "") or f"alerts-ronet-{flow.id}")
+
+        if not host or not topic:
+            self.log.warning("ronet: empty broker_host or topic (flow=%s)", flow.id)
+            return False
+
+        c = self._get_or_create_client(host, port, client_id, username, password)
+
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                r.read()
-        except Exception:
-            pass
+            info = c.publish(topic, payload_json, qos=qos, retain=retain)
+            # дождёмся результата публикации (коротко)
+            info.wait_for_publish(timeout=self.timeout)
+            return True
+        except Exception as e:
+            self.log.error("ronet mqtt publish failed: %s", e)
+            return False
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +319,91 @@ def _format_message(flow_name: str, block_title: str, lines: List[Tuple[List[str
     body = _render_tree_html(tree)
     return head + "\n" + body
 
+def _build_ronet_payload(flow: FlowCfg, items: list[_CollectedItem]) -> dict:
+    """
+    Преобразовать список собранных значений в JSON, который ждёт RoNet/UM SMART.
+    """
+    from datetime import timezone, timedelta
+
+    if not items:
+        return {}
+
+    # Берём последнее время из bucket
+    last_ts = max((it.ts for it in items if isinstance(it.ts, datetime)), default=datetime.now(timezone.utc))
+
+    # tz_offset_minutes из options.ronet (если есть)
+    tz_offset_min = 0
+    try:
+        tz_offset_min = int((flow.ronet or {}).get("tz_offset_minutes", 0))
+    except Exception:
+        tz_offset_min = 0
+    tz = timezone(timedelta(minutes=tz_offset_min))
+    ts_local = last_ts.astimezone(tz)
+    ts_str = ts_local.isoformat()
+
+    # Готовим карту tag -> val по последнему значению
+    last_by_param: dict[ParamKey, Any] = {}
+    for it in items:
+        last_by_param[it.key] = it.value
+
+    tags_arr: list[dict[str, Any]] = []
+    for p in flow.params:
+        # Нужен осмысленный tag
+        if not p.tag:
+            continue
+        key = p.key()
+        if key not in last_by_param:
+            continue
+        val = last_by_param[key]
+        try:
+            # В RoNet часто числа — float
+            val = float(val)
+        except Exception:
+            pass
+        tags_arr.append({"tag": p.tag, "val": val})
+
+    if not tags_arr:
+        return {}
+
+    r_opts = flow.ronet or {}
+    um_name   = r_opts.get("um_name", "UM SMART")
+    um_serial = r_opts.get("um_serial", "")
+    um_fw     = r_opts.get("um_fw", "")
+    measure   = r_opts.get("measure", "aMonth")
+
+    device_id      = int(r_opts.get("device_id", 1) or 1)
+    meter          = int(r_opts.get("meter", device_id) or device_id)
+    device_serial  = r_opts.get("device_serial", "")
+    device_model   = r_opts.get("device_model", "")
+    device_type    = int(r_opts.get("device_type", 0) or 0)
+
+    payload: dict[str, Any] = {
+        "name": um_name,
+        "serial": um_serial,
+        "fw": um_fw,
+        "measures": [
+            {
+                "measure": measure,
+                "devices": [
+                    {
+                        "id": device_id,
+                        "meter": meter,
+                        "serial": device_serial,
+                        "model": device_model,
+                        "type": device_type,
+                        "vals": [
+                            {
+                                "tags": tags_arr,
+                                "ts": ts_str,
+                                "diff": 0,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    return payload
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Алгоритм: окна группировки и сборка сообщений
@@ -350,6 +486,65 @@ class _FlowRuntime:
 
         if not items:
             return
+
+        # --- ВЕТКА ДЛЯ RONET ------------------------------------------------
+        if self.flow.type == "ronet":
+            payload = _build_ronet_payload(self.flow, items)
+            if not payload:
+                return
+
+            rn = (self.flow.ronet or {})
+            dest = {
+                "broker_host": rn.get("broker_host", ""),
+                "broker_port": rn.get("broker_port", 1883),
+                "topic": rn.get("topic", ""),
+            }
+
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            preview = payload_json[:4000]
+
+            if self._on_flush:
+                try:
+                    self._on_flush({
+                        "ts": time.time(),
+                        "flow_id": self.flow.id,
+                        "flow_name": self.flow.name,
+                        "mode": mode,
+                        "count": len(items),
+                        "dest": dest,
+                        "preview": preview,
+                    })
+                except Exception:
+                    pass
+
+            ok = False
+            try:
+                # ВАЖНО: ronet отправляет JSON-строку через send_json
+                if isinstance(self.sender, RonetSender):
+                    ok = self.sender.send_json(self.flow, payload_json)
+                else:
+                    ok = False
+            except Exception:
+                ok = False
+
+            try:
+                from app.services.alerts_engine import alerts_engine as _eng_singleton
+                _eng_singleton._sent({
+                    "ts": time.time(),
+                    "flow_id": self.flow.id,
+                    "flow_name": self.flow.name,
+                    "mode": "События" if mode == "event" else "Интервалы",
+                    "count": len(items),
+                    "dest": dest,
+                    "preview": preview[:1000],
+                    "ok": bool(ok),
+                })
+                if not ok:
+                    _eng_singleton._err(f"ronet send failed for flow={self.flow.id}")
+            except Exception:
+                pass
+
+            return  # на этом всё, дальше телеграм-ветку НЕ выполняем
 
         # сгруппировать по location и подготовить строки
         lines: List[Tuple[List[str], str]] = []
@@ -438,6 +633,148 @@ class _FlowRuntime:
                 _eng_singleton._err(f"send failed for flow={self.flow.id}")
         except Exception:
             pass
+class _LogsFlowRuntime:
+    """
+    Runtime для потоков типа automation_logs.
+    Здесь нет окон группировки: каждый лог → отдельное сообщение.
+    """
+
+    def __init__(
+        self,
+        flow: FlowCfg,
+        sender: Sender,
+        on_flush: Optional[Callable[[dict], None]] = None,
+    ):
+        self.flow = flow
+        self.sender = sender
+        self._on_flush = on_flush
+        self.lock = threading.RLock()
+        self.last_seen_ts: Optional[float] = None
+
+    def _param_cfg(self, source_param: str) -> List[FlowParam]:
+        """
+        Могут быть несколько параметров с одним и тем же source_param (key),
+        поэтому возвращаем список.
+        Для automation_logs мы кладём source_param в p.name.
+        """
+        res: List[FlowParam] = []
+        for p in self.flow.params:
+            if p.name == source_param:
+                res.append(p)
+        return res
+
+    def on_log(
+        self,
+        *,
+        source_param: str,
+        level: str,
+        msg: str,
+        ts: datetime,
+        ctx: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.last_seen_ts = time.time()
+        if not self.flow.enabled:
+            return
+        if not source_param:
+            return
+
+        params = self._param_cfg(source_param)
+        if not params:
+            # лог пришёл, но для такого source_param поток не настроен
+            return
+
+        lines: List[Tuple[List[str], str]] = []
+
+        # перевод уровней в человекочитаемый русский
+        lvl = (level or "").upper()
+        lvl_ru = {
+            "DEBUG": "отладка",
+            "INFO": "информация",
+            "WARNING": "предупреждение",
+            "WARN": "предупреждение",
+            "ERROR": "ошибка",
+            "CRITICAL": "авария",
+        }.get(lvl, lvl.lower() or "сообщение")
+
+        # ts приводим к локальному и красиво форматируем
+        try:
+            ts_local = ts.astimezone()
+        except Exception:
+            ts_local = datetime.now().astimezone()
+        ts_txt = ts_local.strftime("%d.%m.%Y %H:%M:%S")
+
+        for p in params:
+            alias = p.alias or source_param
+            loc_path = [
+                seg.strip()
+                for seg in (p.location or "").split("/")
+                if seg.strip()
+            ]
+            if not loc_path:
+                loc_path = ["Объект"]
+
+            leaf = (
+                f"<b>{_html_escape(alias)}</b> — "
+                f"[{ts_txt}] {lvl_ru}: {_html_escape(msg or '')}"
+            )
+
+            lines.append((loc_path, leaf))
+
+        if not lines:
+            return
+
+        text = _format_message(self.flow.name, "Логи автоматики", lines)
+
+        dest: Dict[str, Any] = {}
+        if self.flow.type == "automation_logs":
+            # по сути это телеграм-канал, оставляем тот же формат, что и у telegram
+            dest = {"telegram_chat_id": (self.flow.telegram or {}).get("chat_id")}
+
+        # для /api/alerts/outbox
+        if self._on_flush:
+            try:
+                self._on_flush(
+                    {
+                        "ts": time.time(),
+                        "flow_id": self.flow.id,
+                        "flow_name": self.flow.name,
+                        "mode": "log",
+                        "count": len(lines),
+                        "dest": dest,
+                        "preview": text[:4000],
+                    }
+                )
+            except Exception:
+                pass
+
+        ok = False
+        try:
+            ok = self.sender.send(self.flow, text)
+        except Exception:
+            ok = False
+
+        # логируем факт отправки во внутренний sent_log, как _FlowRuntime._flush
+        try:
+            from app.services.alerts_engine import alerts_engine as _eng_singleton
+
+            _eng_singleton._sent(
+                {
+                    "ts": time.time(),
+                    "flow_id": self.flow.id,
+                    "flow_name": self.flow.name,
+                    "mode": "Логи автоматики",
+                    "count": len(lines),
+                    "dest": dest,
+                    "preview": text[:1000],
+                    "ok": bool(ok),
+                }
+            )
+            if not ok:
+                _eng_singleton._err(
+                    f"send failed for automation_logs flow={self.flow.id}"
+                )
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -448,12 +785,46 @@ class AlertsEngine:
     def __init__(self):
         self._lock = threading.RLock()
         self._flows: List[FlowCfg] = []
-        self._rt: Dict[str, _FlowRuntime] = {}  # id -> runtime
+
+        from typing import Union
+        self._rt: Dict[str, Union[_FlowRuntime, _LogsFlowRuntime]] = {}
+
         self._last_errors: list[dict[str, Any]] = []
         self._last_flushes: list[dict[str, Any]] = []
         self._sent_log: list[dict[str, Any]] = []  # последние отправки/попытки
 
     # ── публичные методы для интеграции ──────────────────────────────────────
+    def notify_automation_log(
+        self,
+        *,
+        source_param: str,
+        level: str,
+        msg: str,
+        ts: Optional[datetime] = None,
+        ctx: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Вызвать при получении LOG-действия автоматики.
+
+        source_param — то, что ты задаёшь в extra["source_param"] (и выбираешь в UI).
+        """
+        if not source_param:
+            return
+        t = ts or datetime.now(timezone.utc)
+
+        with self._lock:
+            for fr in self._rt.values():
+                # интересуют только потоки типа automation_logs
+                if not isinstance(fr, _LogsFlowRuntime):
+                    continue
+                fr.on_log(
+                    source_param=source_param,
+                    level=level,
+                    msg=msg,
+                    ts=t,
+                    ctx=ctx or {},
+                )
+
 
     def _on_flush(self, info: dict) -> None:
         self._last_flushes.append(info)
@@ -489,12 +860,13 @@ class AlertsEngine:
 
     def stop(self) -> None:
         with self._lock:
-            for f in self._rt.values():
-                try:
-                    if f.events.timer: f.events.timer.cancel()
-                    if f.intervals.timer: f.intervals.timer.cancel()
-                except Exception:
-                    pass
+            for rt in self._rt.values():
+                if isinstance(rt, _FlowRuntime):
+                    try:
+                        if rt.events.timer: rt.events.timer.cancel()
+                        if rt.intervals.timer: rt.intervals.timer.cancel()
+                    except Exception:
+                        pass
             self._rt.clear()
 
     def reload_config(self) -> None:
@@ -505,30 +877,37 @@ class AlertsEngine:
             # пересоздать рантаймы
             self._rt.clear()
             for f in flows:
-                # параметры можно хранить в основном YAML: alerts: { insecure_tls: false, timeout_s: 10 }
                 alerts_sec = getattr(settings, "alerts", {}) or {}
                 insecure = bool(alerts_sec.get("insecure_tls", False))
                 timeout_s = int(alerts_sec.get("http_timeout_s", 10) or 10)
 
-                sender = TelegramSender(insecure_tls=insecure,
-                                        timeout=timeout_s) if f.type == "telegram" else RonetSender()
+                if f.type in ("telegram", "automation_logs"):
+                    sender = TelegramSender(
+                        insecure_tls=insecure,
+                        timeout=timeout_s,
+                    )
+                else:
+                    sender = RonetSender()
 
-                self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
+                if f.type == "automation_logs":
+                    self._rt[f.id] = _LogsFlowRuntime(f, sender, self._on_flush)
+                else:
+                    self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
+
 
     def notify_publish(self, *, line: str, unit_id: int, name: str,
                        value: Any, pub_kind: str, ts: Optional[datetime] = None) -> None:
-        """
-        Вызвать это при каждой публикации параметра.
-        pub_kind: "event" | "interval" | "on_change" (будет трактоваться как "event")
-        ts: время публикации (UTC). Если None — возьмём now(UTC).
-
-        РЕКОМЕНДАЦИЯ: звать из mqtt_bridge._publisher_loop сразу после обновления current_store.
-        """
         key = (line, int(unit_id), name)
         t = ts or datetime.now(timezone.utc)
+
         with self._lock:
             for fr in self._rt.values():
-                fr.on_publish(key, value, pub_kind, t)
+                try:
+                    fn = getattr(fr, "on_publish", None)
+                    if callable(fn):
+                        fn(key, value, pub_kind, t)
+                except Exception as e:
+                    self._err(f"notify_publish runtime failed: {e}")
 
     # ── хелперы для API/UI ───────────────────────────────────────────────────
 
@@ -548,15 +927,23 @@ class AlertsEngine:
             self._flows = flows
             self._rt.clear()
             for f in flows:
-                # параметры можно хранить в основном YAML: alerts: { insecure_tls: false, timeout_s: 10 }
                 alerts_sec = getattr(settings, "alerts", {}) or {}
                 insecure = bool(alerts_sec.get("insecure_tls", False))
                 timeout_s = int(alerts_sec.get("http_timeout_s", 10) or 10)
 
-                sender = TelegramSender(insecure_tls=insecure,
-                                        timeout=timeout_s) if f.type == "telegram" else RonetSender()
+                if f.type in ("telegram", "automation_logs"):
+                    sender = TelegramSender(
+                        insecure_tls=insecure,
+                        timeout=timeout_s,
+                    )
+                else:
+                    sender = RonetSender()
 
-                self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
+                if f.type == "automation_logs":
+                    self._rt[f.id] = _LogsFlowRuntime(f, sender, self._on_flush)
+                else:
+                    self._rt[f.id] = _FlowRuntime(f, sender, self._on_flush)
+
         return backup
 
     def list_known_params_from_main_cfg(self) -> List[Dict[str, Any]]:
@@ -642,6 +1029,26 @@ class AlertsEngine:
             flows = []
             for f in self._flows:
                 rt = self._rt.get(f.id)
+
+                if isinstance(rt, _FlowRuntime):
+                    runtime_info = {
+                        "events_buffer": len(rt.events.items),
+                        "intervals_buffer": len(rt.intervals.items),
+                        "last_seen": getattr(rt, "last_seen_ts", None),
+                    }
+                elif isinstance(rt, _LogsFlowRuntime):
+                    runtime_info = {
+                        "events_buffer": None,
+                        "intervals_buffer": None,
+                        "last_seen": getattr(rt, "last_seen_ts", None),
+                    }
+                else:
+                    runtime_info = {
+                        "events_buffer": None,
+                        "intervals_buffer": None,
+                        "last_seen": None,
+                    }
+
                 flows.append({
                     "id": f.id,
                     "name": f.name,
@@ -650,19 +1057,16 @@ class AlertsEngine:
                     "params": len(f.params or []),
                     "events_selected": len((f.events.include or [])),
                     "intervals_selected": len((f.intervals.include or [])),
-                    "runtime": {
-                        "events_buffer": (len(rt.events.items) if rt else 0),
-                        "intervals_buffer": (len(rt.intervals.items) if rt else 0),
-                        "last_seen": getattr(rt, "last_seen_ts", None),
-                    },
-                    # НОВОЕ: чтобы не гадать, подхватились ли токены
+                    "runtime": runtime_info,
                     "telegram": {
                         "has_token": bool((f.telegram or {}).get("bot_token")),
                         "has_chat_id": bool((f.telegram or {}).get("chat_id")),
-                        "chat_id": str((f.telegram or {}).get("chat_id", ""))[:6] + "…" if (f.telegram or {}).get(
-                            "chat_id") else "",
-                    } if f.type == "telegram" else None,
+                        "chat_id": str((f.telegram or {}).get("chat_id", ""))[:6] + "…"
+                        if (f.telegram or {}).get("chat_id")
+                        else "",
+                    } if f.type in ("telegram", "automation_logs") else None,
                 })
+
             return {
                 "running": True,
                 "flows": flows,
@@ -711,9 +1115,11 @@ class AlertsEngine:
         for i, it in enumerate((raw or {}).get("flows", []) or []):
             fid = str(it.get("id") or f"flow-{i + 1}")
             name = str(it.get("name") or fid)
+
             typ = str(it.get("type") or "telegram").lower()
-            if typ not in ("telegram", "ronet"):
+            if typ not in ("telegram", "ronet", "automation_logs"):
                 typ = "telegram"
+
             enabled = bool(it.get("enabled", True))
 
             # options.telegram|ronet (новый фронт) + fallback на топ-левел telegram/ronet
@@ -734,46 +1140,110 @@ class AlertsEngine:
             rn1 = (opts.get("ronet") or {}) if isinstance(opts, dict) else {}
             rn2 = it.get("ronet") or {}
             ronet_opts: Dict[str, Any] = {}
-            for k in ("endpoint_url", "endpoint", "api_key", "token"):  # на будущее
+
+            RONET_KEYS = (
+                # MQTT destination
+                "broker_host", "broker_port",
+                "username", "password",
+                "client_id",
+                "topic", "qos", "retain",
+
+                # UM / device meta
+                "um_name", "um_serial", "um_fw",
+                "measure",
+                "device_id", "meter",
+                "device_serial", "device_model", "device_type",
+                "tz_offset_minutes",
+            )
+
+            for k in RONET_KEYS:
                 v1 = rn1.get(k) if isinstance(rn1, dict) else None
                 v2 = rn2.get(k) if isinstance(rn2, dict) else None
                 v = (v1 if (v1 is not None and str(v1).strip() != "") else
                      (v2 if (v2 is not None and str(v2).strip() != "") else None))
                 if v is not None:
-                    ronet_opts[k] = str(v)
+                    ronet_opts[k] = v
 
-            # params: принимаем либо старый вид (line/unit_id/name), либо новый (key + path)
+
+            # params: для обычных потоков ожидаем key в формате line|unit_id|name,
+            # для automation_logs — key == source_param (просто строка).
             params: List[FlowParam] = []
             for p in it.get("params", []) or []:
                 try:
-                    if "key" in p:
-                        line, uid, pname = _parse_key_str(str(p.get("key") or "||"))
-                        params.append(FlowParam(
-                            line=line,
-                            unit_id=int(uid),
-                            name=pname,
-                            alias=str(p.get("alias") or pname),
-                            location=str(p.get("path") or ""),
-                            nominal=(None if p.get("nominal", None) is None else float(p.get("nominal"))),
-                            tolerance=(None if p.get("tolerance", None) is None else float(p.get("tolerance"))),
-                            ok_text=str(p.get("ok_text", "OK")),
-                            alarm_text=str(p.get("alarm_text", "ALARM")),
-                        ))
+                    if typ == "automation_logs":
+                        key_str = str(p.get("key") or "").strip()
+                        if not key_str:
+                            continue
+                        params.append(
+                            FlowParam(
+                                # "фиктивные" line/unit_id, т.к. здесь они не используются
+                                line="logs",
+                                unit_id=0,
+                                name=key_str,  # здесь лежит именно source_param
+                                alias=str(p.get("alias") or key_str),
+                                location=str(p.get("path") or p.get("location", "")),
+                                nominal=None,
+                                tolerance=None,
+                                ok_text="OK",
+                                alarm_text="ALARM",
+                            )
+                        )
                     else:
-                        params.append(FlowParam(
-                            line=str(p.get("line", "")),
-                            unit_id=int(p.get("unit_id", 0)),
-                            name=str(p.get("name", "")),
-                            alias=str(p.get("alias") or p.get("name", "")),
-                            location=str(p.get("location", "") or p.get("path", "")),
-                            nominal=(None if p.get("nominal", None) is None else float(p.get("nominal"))),
-                            tolerance=(None if p.get("tolerance", None) is None else float(p.get("tolerance"))),
-                            ok_text=str(p.get("ok_text", "OK")),
-                            alarm_text=str(p.get("alarm_text", "ALARM")),
-                        ))
+                        if "key" in p:
+                            line, uid, pname = _parse_key_str(
+                                str(p.get("key") or "||")
+                            )
+                            params.append(
+                                FlowParam(
+                                    line=line,
+                                    unit_id=int(uid),
+                                    name=pname,
+                                    alias=str(p.get("alias") or pname),
+                                    location=str(p.get("path") or ""),
+                                    nominal=(
+                                        None
+                                        if p.get("nominal", None) is None
+                                        else float(p.get("nominal"))
+                                    ),
+                                    tolerance=(
+                                        None
+                                        if p.get("tolerance", None) is None
+                                        else float(p.get("tolerance"))
+                                    ),
+                                    ok_text=str(p.get("ok_text", "OK")),
+                                    alarm_text=str(p.get("alarm_text", "ALARM")),
+                                    tag=str(p.get("tag") or ""),
+                                )
+                            )
+                        else:
+                            params.append(
+                                FlowParam(
+                                    line=str(p.get("line", "")),
+                                    unit_id=int(p.get("unit_id", 0)),
+                                    name=str(p.get("name", "")),
+                                    alias=str(p.get("alias") or p.get("name", "")),
+                                    location=str(
+                                        p.get("location", "") or p.get("path", "")
+                                    ),
+                                    nominal=(
+                                        None
+                                        if p.get("nominal", None) is None
+                                        else float(p.get("nominal"))
+                                    ),
+                                    tolerance=(
+                                        None
+                                        if p.get("tolerance", None) is None
+                                        else float(p.get("tolerance"))
+                                    ),
+                                    ok_text=str(p.get("ok_text", "OK")),
+                                    alarm_text=str(p.get("alarm_text", "ALARM")),
+                                    tag=str(p.get("tag") or ""),
+                                )
+                            )
                 except Exception:
                     # пропускаем битый элемент
                     continue
+
 
             # sections: events / intervals
             def _mk_filter(d: Dict[str, Any]) -> FlowFilter:
@@ -856,15 +1326,26 @@ class AlertsEngine:
                     "ronet": f.ronet or {},
                 },
                 "params": [
-                    {
-                        "key": _key_to_str(p.line, p.unit_id, p.name),
-                        "alias": p.alias,
-                        "path": p.location,
-                        "nominal": p.nominal,
-                        "tolerance": p.tolerance,
-                        "ok_text": p.ok_text,
-                        "alarm_text": p.alarm_text,
-                    } for p in f.params
+                    (
+                        {
+                            # для automation_logs key == source_param
+                            "key": p.name,
+                            "alias": p.alias,
+                            "path": p.location,
+                        }
+                        if f.type == "automation_logs"
+                        else {
+                            "key": _key_to_str(p.line, p.unit_id, p.name),
+                            "alias": p.alias,
+                            "path": p.location,
+                            "nominal": p.nominal,
+                            "tolerance": p.tolerance,
+                            "ok_text": p.ok_text,
+                            "alarm_text": p.alarm_text,
+                            "tag": p.tag,
+                        }
+                    )
+                    for p in f.params
                 ],
                 "events": {
                     "group_window_s": f.events.group_window_s,

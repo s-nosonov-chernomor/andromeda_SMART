@@ -1,0 +1,852 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2 style="margin:6px 0 14px;">Автоматика</h2>
+
+<div class="card">
+  <div class="toolbar" style="justify-content: space-between;">
+    <div class="filters">
+      <button class="btn btn-primary" id="btn-automation-reload" type="button">
+        Перечитать rules.yaml
+      </button>
+      <button class="btn btn-ghost" id="btn-automation-refresh" type="button">
+        Обновить список
+      </button>
+    </div>
+
+    <div class="filters">
+      <span id="automation-info" class="badge">—</span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="tblAutomation" class="table">
+      <thead>
+        <tr>
+          <th>Имя правила</th>
+          <th>Описание</th>
+          <th>Статус</th>
+          <th class="right">Срабатываний</th>
+          <th>Последнее срабатывание</th>
+          <th>Последняя ошибка</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- наполним через JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Правила загружаются из файла <code>data/rules.yaml</code>.
+    Перечитывание файла не требует перезапуска всего сервиса.
+  </div>
+</div>
+
+<!-- Редактор правила -->
+<div class="card" style="margin-top:16px;">
+  <div class="toolbar" style="justify-content: space-between;">
+    <h3 style="margin:0;">Редактор правила</h3>
+    <div class="filters">
+      <button class="btn btn-ghost" id="btn-rule-new" type="button">Новое правило</button>
+      <button class="btn btn-primary" id="btn-rule-save" type="button">Сохранить правило</button>
+      <button class="btn btn-ghost" id="btn-rule-delete" type="button">Удалить</button>
+    </div>
+  </div>
+
+  <!-- Сверху – общие данные правила -->
+  <div class="grid cols-2" style="gap:16px; margin-top:8px;">
+    <div>
+      <label class="label">Имя правила</label>
+      <input type="text" id="rule-name" class="input" placeholder="Например: включить_досветку_1">
+
+      <label class="label" style="margin-top:8px;">
+        <input type="checkbox" id="rule-enabled" style="margin-right:6px;">
+        Правило включено
+      </label>
+
+      <label class="label" style="margin-top:12px;">Описание (для себя)</label>
+      <textarea id="rule-description" class="input" rows="3"
+                placeholder="Кратко: что делает правило"></textarea>
+
+      <div class="muted" style="margin-top:8px;font-size:12px;">
+        При выборе строки в таблице выше её данные подставятся сюда.
+      </div>
+    </div>
+
+    <!-- Опции правила -->
+    <div>
+      <label class="label">Режим срабатывания (fire_mode)</label>
+      <select id="rule-fire-mode" class="input">
+        <option value="edge">edge — только по фронту (False→True)</option>
+        <option value="level">level — каждый раз, пока условие истинно</option>
+      </select>
+
+      <label class="label" style="margin-top:8px;">Минимальный интервал между срабатываниями, сек</label>
+      <input type="number" id="rule-min-interval" class="input" min="0" step="0.1"
+             placeholder="0 = без ограничения">
+
+      <div class="muted" style="margin-top:8px;font-size:12px;">
+        <b>edge</b> — правило стреляет только при переходе условия из ложного в истинное.<br>
+        <b>level</b> — правило стреляет при каждом обновлении контролируемых тегов, пока условие True.<br>
+        <b>Минимальный интервал</b> — защита от очередей и дребезга (cooldown).
+      </div>
+    </div>
+  </div>
+
+  <!-- Ниже – условия слева, действия справа -->
+  <div class="grid cols-2" style="gap:16px; margin-top:16px;">
+    <div>
+      <label class="label">Условие (condition) — текстовое представление</label>
+      <textarea id="rule-condition" class="input" rows="4"
+                placeholder="Например: реле3 == 1 and реле4 == 0 and реле5 == 0"></textarea>
+
+      <!-- Конструктор условий (inline) -->
+      <div class="card" style="margin-top:8px; padding:8px;">
+        <div class="grid cols-4" style="gap:6px; align-items:flex-end;">
+          <div>
+            <label class="label">Тег</label>
+            <input type="text" id="cond-tag" class="input" placeholder="реле3">
+          </div>
+          <div>
+            <label class="label">Оператор</label>
+            <select id="cond-op" class="input">
+              <option value="==">== (равно)</option>
+              <option value="!=">!= (не равно)</option>
+              <option value=">">&gt;</option>
+              <option value=">=">&gt;=</option>
+              <option value="<">&lt;</option>
+              <option value="<=">&lt;=</option>
+              <option value="is_true">is_true</option>
+              <option value="is_false">is_false</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Значение</label>
+            <input type="text" id="cond-value" class="input" placeholder="1">
+          </div>
+          <div>
+            <button class="btn btn-primary" type="button" id="btn-cond-add">
+              Добавить в условие
+            </button>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:4px;font-size:12px;">
+          Для составных условий связывайте фрагменты через <code>and</code>, <code>or</code>, <code>not</code>.<br>
+          Пример: <code>реле3 == 1 and реле4 == 0 and реле5 == 0</code>.
+        </div>
+        <div id="cond-list" class="muted" style="margin-top:4px;font-size:12px;">
+          Условий пока нет.
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <label class="label">Действия (actions, JSON)</label>
+      <textarea id="rule-actions" class="input" rows="6"
+                placeholder='[
+  {
+    "id": "relay4_on",
+    "type": "mqtt_publish",
+    "mqtt": { "topic": "/devices/unit180/controls/реле4/on", "payload": { "value": "1" } }
+  }
+]'></textarea>
+
+      <!-- Визуальный конструктор действий -->
+      <label class="label" style="margin-top:8px;">Действия (визуальный конструктор)</label>
+      <div id="actions-builder"></div>
+      <button class="btn btn-ghost" type="button" id="btn-action-add" style="margin-top:8px;">
+        + Добавить действие
+      </button>
+
+      <div class="muted" style="margin-top:6px;font-size:12px;">
+        Поддерживаемые действия:
+        <ul style="margin:4px 0 0 16px;padding:0;font-size:12px;">
+          <li><code>mqtt_publish</code> — отправка команды/события в MQTT (например, включить реле).</li>
+          <li><code>log</code> — запись в лог автоматики.</li>
+          <li><code>trigger_rule</code> — принудительный запуск другого правила по <code>rule_id</code>.</li>
+        </ul>
+        JSON в поле выше автоматически синхронизируется с визуальным конструктором.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (s)=>document.querySelector(s);
+
+  const tblBody = $('#tblAutomation tbody');
+  const info    = $('#automation-info');
+  const btnReload  = $('#btn-automation-reload');
+  const btnRefresh = $('#btn-automation-refresh');
+
+  const inpName        = $('#rule-name');
+  const chkEnabled     = $('#rule-enabled');
+  const txtDesc        = $('#rule-description');
+  const txtCond        = $('#rule-condition');
+  const txtActs        = $('#rule-actions');
+  const inpFireMode    = $('#rule-fire-mode');
+  const inpMinInterval = $('#rule-min-interval');
+
+  const btnNew    = $('#btn-rule-new');
+  const btnSave   = $('#btn-rule-save');
+  const btnDelete = $('#btn-rule-delete');
+
+  const condTag   = $('#cond-tag');
+  const condOp    = $('#cond-op');
+  const condValue = $('#cond-value');
+  const btnCondAdd= $('#btn-cond-add');
+  const condList  = $('#cond-list');
+
+  const actionsBuilder = $('#actions-builder');
+  const btnActionAdd   = $('#btn-action-add');
+
+  let rules = [];              // то, что пришло с сервера
+  let selectedName = null;     // имя выбранного правила
+  let selectedRuleId = null;   // id выбранного правила
+  let condState = {            // текущее структурное состояние условий
+    all_of: [],
+    any_of: []
+  };
+
+  function safe(v){ return (v === null || v === undefined) ? '' : String(v); }
+
+  function fmtTs(ts){
+    if (!ts) return '—';
+    if (typeof ts === 'string' && !/[Zz]|[+\-]\d\d:?\d\d$/.test(ts)) {
+      ts = ts + 'Z';
+    }
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return safe(ts);
+    return d.toLocaleString();
+  }
+
+  function renderList(list){
+    tblBody.innerHTML = '';
+
+    if (!list || !list.length){
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="6" class="muted">Правила не найдены</td>';
+      tblBody.appendChild(tr);
+      info.textContent = 'Правил: 0';
+      return;
+    }
+
+    for (const r of list){
+      const name  = safe(r.name || r.id || '(без имени)');
+      const desc  = safe(r.description || '');
+      const enabled = (r.enabled !== false && r.status !== 'disabled');
+      const statusText = enabled ? 'включено' : 'выключено';
+      const statusClass = enabled ? 'ok' : 'warn';
+
+      const fireCount = (typeof r.fire_count === 'number')
+        ? r.fire_count
+        : (r.stats && r.stats.fire_count) || 0;
+      const lastFired = r.last_fired || (r.stats && r.stats.last_fired_at) || null;
+      const lastError = r.last_error || (r.stats && r.stats.last_error) || '';
+
+      const tr = document.createElement('tr');
+      if (selectedName && selectedName === name){
+        tr.classList.add('selected');
+      }
+
+      tr.innerHTML = `
+        <td>${name}</td>
+        <td>${desc}</td>
+        <td><span class="status ${statusClass}">${statusText}</span></td>
+        <td class="right">${fireCount || 0}</td>
+        <td>${fmtTs(lastFired)}</td>
+        <td>${safe(lastError)}</td>
+      `;
+
+      tr.addEventListener('click', ()=> {
+        selectedName = name;
+        selectedRuleId = r.id || null;
+        fillEditorFromRule(r);
+        document.querySelectorAll('#tblAutomation tbody tr').forEach(row=>row.classList.remove('selected'));
+        tr.classList.add('selected');
+      });
+
+      tblBody.appendChild(tr);
+    }
+
+    info.textContent = 'Правил: ' + list.length;
+  }
+
+  function clearEditor(){
+    selectedName = null;
+    selectedRuleId = null;
+    inpName.value = '';
+    chkEnabled.checked = true;
+    txtDesc.value = '';
+    txtCond.value = '';
+    txtActs.value = '';
+    inpFireMode.value = 'edge';
+    inpMinInterval.value = '';
+    condState = { all_of: [], any_of: [] };
+    updateCondList();
+    actionsBuilder.innerHTML = '';
+    document.querySelectorAll('#tblAutomation tbody tr').forEach(row=>row.classList.remove('selected'));
+  }
+
+  function conditionToString(group) {
+    if (!group) return '';
+    const all = Array.isArray(group.all_of) ? group.all_of : [];
+    const any = Array.isArray(group.any_of) ? group.any_of : [];
+
+    const makeExpr = (c) => {
+      if (!c || !c.tag || !c.op) return '';
+      const op = c.op;
+      if (op === 'is_true' || op === 'is_false') {
+        return `${c.tag} ${op}`;
+      }
+      let v = c.operand;
+      if (v === null || v === undefined) {
+        return `${c.tag} ${op} ?`;
+      }
+      if (typeof v === 'string') {
+        if (!/^".*"$/.test(v) && !/^\d+(\.\d+)?$/.test(v)) {
+          v = `"${v}"`;
+        }
+      }
+      return `${c.tag} ${op} ${v}`;
+    };
+
+    const allParts = all.map(makeExpr).filter(x => x);
+    const anyParts = any.map(makeExpr).filter(x => x);
+
+    let txt = '';
+    if (allParts.length) {
+      txt += allParts.join(' and ');
+    }
+    if (anyParts.length) {
+      if (txt) txt += ' and ';
+      txt += '(' + anyParts.join(' or ') + ')';
+    }
+    return txt;
+  }
+
+  function updateCondList() {
+    if (!condList) return;
+    const all = condState.all_of || [];
+    const any = condState.any_of || [];
+    if (!all.length && !any.length) {
+      condList.textContent = 'Условий пока нет.';
+      return;
+    }
+    const parts = [];
+    if (all.length) {
+      parts.push('ALL_OF: ' + all.map(c => `${c.tag} ${c.op} ${c.operand ?? ''}`.trim()).join('; '));
+    }
+    if (any.length) {
+      parts.push('ANY_OF: ' + any.map(c => `${c.tag} ${c.op} ${c.operand ?? ''}`.trim()).join('; '));
+    }
+    condList.textContent = parts.join(' | ');
+  }
+
+  function fillEditorFromRule(r){
+    if (!r){
+      clearEditor();
+      return;
+    }
+
+    inpName.value = r.name || '';
+    if (r.status === 'disabled' || r.enabled === false) {
+      chkEnabled.checked = false;
+    } else {
+      chkEnabled.checked = true;
+    }
+    txtDesc.value = r.description || '';
+
+    // опции
+    const opts = r.options || {};
+    inpFireMode.value = opts.fire_mode || 'edge';
+    if (opts.min_interval_sec != null) {
+      inpMinInterval.value = opts.min_interval_sec;
+    } else {
+      inpMinInterval.value = '';
+    }
+
+    // условия
+    if (r.conditions && ( (r.conditions.all_of && r.conditions.all_of.length) ||
+                          (r.conditions.any_of && r.conditions.any_of.length) )) {
+      condState = {
+        all_of: (r.conditions.all_of || []).map(c => Object.assign({}, c)),
+        any_of: (r.conditions.any_of || []).map(c => Object.assign({}, c)),
+      };
+      txtCond.value = conditionToString(condState);
+    } else {
+      condState = { all_of: [], any_of: [] };
+      txtCond.value = r.condition || r.if || '';
+    }
+    updateCondList();
+
+    // actions
+    if (Array.isArray(r.actions)){
+      try{
+        txtActs.value = JSON.stringify(r.actions, null, 2);
+      }catch(_){
+        txtActs.value = '';
+      }
+    }else{
+      txtActs.value = '';
+    }
+
+    buildActionsUIFromJson();
+  }
+
+  async function loadRules(){
+    try{
+      info.textContent = 'Загрузка...';
+      const r = await fetch('/api/automation/rules', {cache:'no-store'});
+      if (!r.ok){
+        const txt = await r.text();
+        info.textContent = 'Ошибка загрузки';
+        alert('Ошибка загрузки правил: ' + txt);
+        return;
+      }
+      const data = await r.json();
+      const list = Array.isArray(data) ? data : (data.rules || []);
+      rules = list;
+      renderList(rules);
+
+      if (selectedName){
+        const found = rules.find(x => safe(x.name) === safe(selectedName));
+        if (found) {
+          selectedRuleId = found.id || null;
+          fillEditorFromRule(found);
+        }
+      }
+    }catch(e){
+      console.error(e);
+      info.textContent = 'Ошибка загрузки: ' + (e.message || e);
+    }
+  }
+
+  async function reloadRulesFile(){
+    try{
+      btnReload.disabled = true;
+      info.textContent = 'Перечитывание rules.yaml...';
+      const r = await fetch('/api/automation/reload', {method:'POST'});
+      if (!r.ok){
+        const txt = await r.text();
+        info.textContent = 'Ошибка перезагрузки: ' + txt;
+      }else{
+        info.textContent = 'rules.yaml перечитан, обновляем список...';
+        await loadRules();
+        info.textContent = 'Готово';
+      }
+    }catch(e){
+      console.error(e);
+      info.textContent = 'Ошибка перезагрузки: ' + (e.message || e);
+    }finally{
+      btnReload.disabled = false;
+    }
+  }
+
+  async function saveRule(){
+    const name = inpName.value.trim();
+    if (!name){
+      info.textContent = 'Ошибка: укажите имя правила';
+      return;
+    }
+
+    const enabled = chkEnabled.checked;
+    const description = txtDesc.value.trim();
+    const condition = txtCond.value.trim();
+    const fireMode = (inpFireMode.value || 'edge').trim();
+
+    let minIntervalSec = null;
+    const minIntervalRaw = inpMinInterval.value.trim();
+    if (minIntervalRaw !== '') {
+      const num = Number(minIntervalRaw.replace(',', '.'));
+      if (isNaN(num) || num < 0) {
+        info.textContent = 'Ошибка: минимальный интервал должен быть неотрицательным числом';
+        return;
+      }
+      minIntervalSec = num;
+    }
+
+    if (!condition && (!condState.all_of.length && !condState.any_of.length)){
+      info.textContent = 'Внимание: условие пустое, правило никогда не сработает';
+    }
+
+    let actionsArr = [];
+    const rawActs = txtActs.value.trim();
+    if (rawActs){
+      try{
+        const parsed = JSON.parse(rawActs);
+        if (!Array.isArray(parsed)){
+          info.textContent = 'Ошибка: actions должен быть JSON-массивом';
+          return;
+        }
+        actionsArr = parsed;
+      }catch(e){
+        info.textContent = 'Ошибка JSON в actions: ' + e.message;
+        return;
+      }
+    }
+
+    const hasStructuredConds =
+      (condState.all_of && condState.all_of.length) ||
+      (condState.any_of && condState.any_of.length);
+
+    const payload = {
+      id: selectedRuleId || undefined,
+      name,
+      enabled,
+      description,
+      condition,
+      actions: actionsArr,
+      options: {
+        fire_mode: fireMode,
+        min_interval_sec: minIntervalSec
+      }
+    };
+
+    if (hasStructuredConds) {
+      payload.conditions = condState;
+    }
+
+    try{
+      btnSave.disabled = true;
+      info.textContent = 'Сохранение...';
+
+      const r = await fetch('/api/automation/rules/save', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok){
+        const txt = await r.text();
+        info.textContent = 'Ошибка сохранения: ' + txt;
+        return;
+      }
+      const resp = await r.json().catch(()=>null);
+      if (resp && resp.id) {
+        selectedRuleId = resp.id;
+      }
+      selectedName = name;
+
+      // сразу перечитываем rules.yaml на бэкенде
+      info.textContent = 'Перечитывание rules.yaml...';
+      await fetch('/api/automation/reload', {method:'POST'}).catch(()=>{});
+
+      await loadRules();
+      info.textContent = 'Правило сохранено и автоматика перезагружена';
+    }catch(e){
+      console.error(e);
+      info.textContent = 'Ошибка сохранения: ' + (e.message || e);
+    }finally{
+      btnSave.disabled = false;
+    }
+  }
+
+  async function deleteRule(){
+    const name = inpName.value.trim();
+    if (!name){
+      alert('Сначала выберите правило или укажите его имя');
+      return;
+    }
+    if (!confirm('Удалить правило "' + name + '"?')) return;
+
+    try{
+      btnDelete.disabled = true;
+      const r = await fetch('/api/automation/rules/delete', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({name}),
+      });
+      if (!r.ok){
+        const txt = await r.text();
+        alert('Ошибка удаления: ' + txt);
+        return;
+      }
+      clearEditor();
+      await loadRules();
+      alert('Правило удалено.');
+    }catch(e){
+      console.error(e);
+      alert('Ошибка удаления: ' + (e.message || e));
+    }finally{
+      btnDelete.disabled = false;
+    }
+  }
+
+  // ───────── Конструктор условий ─────────
+  if (btnCondAdd) {
+    btnCondAdd.addEventListener('click', () => {
+      const tag = (condTag.value || '').trim();
+      const op  = (condOp.value || '').trim();
+      const valRaw = (condValue.value || '').trim();
+
+      if (!tag) {
+        alert('Укажите тег');
+        return;
+      }
+      if (!op) {
+        alert('Выберите оператор');
+        return;
+      }
+
+      const cond = { tag, op, operand: null };
+
+      if (op !== 'is_true' && op !== 'is_false') {
+        if (!valRaw) {
+          alert('Укажите значение');
+          return;
+        }
+        let operand = valRaw;
+        const num = Number(valRaw.replace(',', '.'));
+        if (!isNaN(num) && valRaw.match(/^-?\d+([.,]\d+)?$/)) {
+          operand = num;
+        }
+        cond.operand = operand;
+      }
+
+      condState.all_of.push(cond);
+
+      // Человеческий текст в textarea
+      let fragment = '';
+      if (op === 'is_true' || op === 'is_false') {
+        fragment = `${tag} ${op}`;
+      } else {
+        let vtxt = cond.operand;
+        if (typeof vtxt === 'string' && !/^-?\d+(\.\d+)?$/.test(vtxt)) {
+          vtxt = `"${vtxt}"`;
+        }
+        fragment = `${tag} ${op} ${vtxt}`;
+      }
+
+      if (txtCond.value.trim()) {
+        txtCond.value = txtCond.value.trim() + ' and ' + fragment;
+      } else {
+        txtCond.value = fragment;
+      }
+
+      updateCondList();
+    });
+  }
+
+  // ───────── ВИЗУАЛЬНЫЙ КОНСТРУКТОР ДЕЙСТВИЙ ─────────
+
+  function fillActionDetails(container, type, action) {
+    if (type === 'mqtt_publish') {
+      const mqtt = action.mqtt || {};
+      container.innerHTML = `
+        <label class="label">MQTT topic</label>
+        <input type="text" class="input action-mqtt-topic"
+               placeholder="/devices/unit180/controls/реле4/on"
+               value="${safe(mqtt.topic || '')}">
+        <label class="label" style="margin-top:6px;">Payload (JSON или строка)</label>
+        <textarea class="input action-mqtt-payload" rows="3"
+          placeholder='{"value": "1"}'>${mqtt.payload !== undefined && mqtt.payload !== null
+            ? safe(typeof mqtt.payload === 'string' ? mqtt.payload : JSON.stringify(mqtt.payload))
+            : ''}</textarea>
+      `;
+    } else if (type === 'log') {
+      const log = action.log || {};
+      container.innerHTML = `
+        <label class="label">Уровень</label>
+        <input type="text" class="input action-log-level"
+               placeholder="INFO" value="${safe(log.level || 'INFO')}">
+        <label class="label" style="margin-top:6px;">Сообщение</label>
+        <input type="text" class="input action-log-message"
+               placeholder="Текст сообщения"
+               value="${safe(log.message || '')}">
+      `;
+    } else if (type === 'trigger_rule') {
+      const trg = action.trigger || {};
+      container.innerHTML = `
+        <label class="label">ID правила для запуска</label>
+        <input type="text" class="input action-trigger-rule-id"
+               placeholder="relay6_on_action"
+               value="${safe(trg.rule_id || '')}">
+        <label class="label" style="margin-top:6px;">Контекст (JSON, опционально)</label>
+        <textarea class="input action-trigger-context" rows="3"
+          placeholder='{"reason": "manual"}'>${trg.context !== undefined && trg.context !== null
+            ? safe(JSON.stringify(trg.context))
+            : ''}</textarea>
+      `;
+    } else {
+      container.innerHTML = `<div class="muted">Неизвестный тип действия</div>`;
+    }
+  }
+
+  function createActionCard(action, index) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.marginTop = '8px';
+    card.dataset.index = index;
+
+    const type = action.type || 'mqtt_publish';
+
+    card.innerHTML = `
+      <div class="toolbar" style="justify-content: space-between;">
+        <div>Действие #${index + 1}</div>
+        <button type="button" class="btn btn-ghost btn-small action-remove">Удалить</button>
+      </div>
+
+      <div class="grid cols-2" style="gap:8px; margin-top:8px;">
+        <div>
+          <label class="label">ID действия</label>
+          <input type="text" class="input action-id" placeholder="relay4_on" value="${safe(action.id || '')}">
+
+          <label class="label" style="margin-top:6px;">Тип действия</label>
+          <select class="input action-type">
+            <option value="mqtt_publish" ${type === 'mqtt_publish' ? 'selected' : ''}>MQTT publish</option>
+            <option value="log" ${type === 'log' ? 'selected' : ''}>LOG</option>
+            <option value="trigger_rule" ${type === 'trigger_rule' ? 'selected' : ''}>Trigger rule</option>
+          </select>
+
+          <label class="label" style="margin-top:6px;">Задержка, мс</label>
+          <input type="number" class="input action-delay" min="0"
+                 value="${action.delay_ms != null ? safe(action.delay_ms) : ''}" placeholder="0">
+
+          <label class="label" style="margin-top:6px;">Описание</label>
+          <input type="text" class="input action-desc" value="${safe(action.description || '')}">
+        </div>
+
+        <div class="action-details"></div>
+      </div>
+    `;
+
+    const details = card.querySelector('.action-details');
+    fillActionDetails(details, type, action);
+
+    card.querySelector('.action-remove').addEventListener('click', () => {
+      card.remove();
+      rebuildActionsJsonFromUI();
+    });
+
+    card.querySelector('.action-type').addEventListener('change', (e) => {
+      const newType = e.target.value;
+      fillActionDetails(details, newType, {});
+      rebuildActionsJsonFromUI();
+    });
+
+    card.querySelectorAll('input,select,textarea').forEach(el => {
+      el.addEventListener('change', () => rebuildActionsJsonFromUI());
+    });
+
+    return card;
+  }
+
+  function rebuildActionsJsonFromUI() {
+    const cards = actionsBuilder.querySelectorAll('.card');
+    const actions = [];
+
+    cards.forEach((card, idx) => {
+      const type = card.querySelector('.action-type').value;
+      const id   = card.querySelector('.action-id').value.trim() || `act_${idx+1}`;
+      const delayStr = card.querySelector('.action-delay').value.trim();
+      const delay_ms = delayStr ? parseInt(delayStr, 10) : null;
+      const desc = card.querySelector('.action-desc').value.trim() || null;
+
+      const act = {
+        id,
+        type,
+        delay_ms,
+        sequential_order: idx,
+        description: desc,
+        mqtt: null,
+        trigger: null,
+        log: null
+      };
+
+      if (type === 'mqtt_publish') {
+        const topic = card.querySelector('.action-mqtt-topic').value.trim();
+        const payloadRaw = card.querySelector('.action-mqtt-payload').value.trim();
+        let payload = {};
+        if (payloadRaw) {
+          try {
+            payload = JSON.parse(payloadRaw);
+          } catch(_) {
+            payload = payloadRaw;
+          }
+        }
+        act.mqtt = {
+          topic,
+          payload,
+          qos: 0,
+          retain: false
+        };
+      } else if (type === 'log') {
+        const level = card.querySelector('.action-log-level').value.trim() || 'INFO';
+        const msg   = card.querySelector('.action-log-message').value.trim() || '';
+        act.log = {
+          message: msg,
+          level,
+          extra: {}
+        };
+      } else if (type === 'trigger_rule') {
+        const rid = card.querySelector('.action-trigger-rule-id').value.trim();
+        const ctxRaw = card.querySelector('.action-trigger-context').value.trim();
+        let ctx = {};
+        if (ctxRaw) {
+          try {
+            ctx = JSON.parse(ctxRaw);
+          } catch(_) {
+            ctx = { raw: ctxRaw };
+          }
+        }
+        act.trigger = {
+          rule_id: rid,
+          context: ctx
+        };
+      }
+
+      actions.push(act);
+    });
+
+    try {
+      txtActs.value = JSON.stringify(actions, null, 2);
+    } catch(e) {
+      console.error('Ошибка сериализации actions:', e);
+    }
+  }
+
+  function buildActionsUIFromJson() {
+    actionsBuilder.innerHTML = '';
+    const raw = txtActs.value.trim();
+    if (!raw) return;
+    let arr = [];
+    try {
+      arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) arr = [];
+    } catch(e) {
+      console.warn('Не удалось разобрать JSON действий:', e);
+      return;
+    }
+    arr.forEach((a, i) => {
+      const card = createActionCard(a, i);
+      actionsBuilder.appendChild(card);
+    });
+  }
+
+  if (btnActionAdd) {
+    btnActionAdd.addEventListener('click', () => {
+      const idx = actionsBuilder.querySelectorAll('.card').length;
+      const card = createActionCard({type:'mqtt_publish'}, idx);
+      actionsBuilder.appendChild(card);
+      rebuildActionsJsonFromUI();
+    });
+  }
+
+  // ---- события ----
+  btnRefresh.addEventListener('click', loadRules);
+  btnReload.addEventListener('click', reloadRulesFile);
+
+  btnNew.addEventListener('click', clearEditor);
+  btnSave.addEventListener('click', saveRule);
+  btnDelete.addEventListener('click', deleteRule);
+
+  // первый запуск
+  loadRules();
+
+})();
+</script>
+
+{% endblock %}

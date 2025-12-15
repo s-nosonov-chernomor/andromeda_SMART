@@ -1,22 +1,195 @@
 rules:
-  - id: "demo_overheat"
-    name: "Пример: перегрев в line1"
-    status: "enabled"
-    conditions:
-      all_of:
-        - tag: "line1.greenhouse1.temp"
-          op: ">="
-          operand: 35
-    actions:
-      - id: "a1"
-        type: "mqtt_publish"
-        mqtt:
-          topic: "persay/events/overheat"
-          payload:
-            msg: "greenhouse1 overheat"
-            level: "warn"
-      - id: "log1"
-        type: "log"
-        log:
-          message: "сработало правило demo_overheat"
-          level: "INFO"
+- id: relay_4_5_on_when_3_on
+  name: Включить реле 4 и 5 при включении реле 3
+  status: enabled
+  description: Если реле3 = 1 и реле4/5 ещё выключены — включаем их
+  virtual_tags: []
+  conditions:
+    all_of:
+    - tag: реле3
+      op: ==
+      operand: 1
+      on_bad: fail
+    - tag: реле4
+      op: ==
+      operand: 0
+      on_bad: fail
+    - tag: реле5
+      op: ==
+      operand: 0
+      on_bad: fail
+    any_of: []
+  options:
+    fire_mode: edge
+    min_interval_sec: 25.0
+  actions:
+  - id: relay4_on
+    type: mqtt_publish
+    delay_ms: 5000
+    sequential_order: 0
+    description: Включить реле4
+    mqtt:
+      topic: /devices/unit180/controls/реле4/on
+      payload:
+        value: '1'
+      qos: 0
+      retain: false
+  - id: relay5_on
+    type: mqtt_publish
+    sequential_order: 1
+    description: Включить реле5
+    mqtt:
+      topic: /devices/unit180/controls/реле5/on
+      payload:
+        value: '1'
+      qos: 0
+      retain: false
+  - id: log_relays45_on
+    type: log
+    sequential_order: 2
+    description: Лог включения реле4 и реле5
+    log:
+      message: Включили реле4 и реле5 по реле3
+      level: INFO
+      extra:
+        source_param: реле334646364пуццу
+- id: relay_4_5_off_when_2_on
+  name: Выключить 4 и 5 если реле2 включено
+  status: enabled
+  description: Включается реле2 — отключаются реле4 и реле5
+  virtual_tags: []
+  conditions:
+    all_of:
+    - tag: реле2
+      op: ==
+      operand: 1
+      on_bad: fail
+    - tag: реле4
+      op: ==
+      operand: 1
+      on_bad: fail
+    - tag: реле5
+      op: ==
+      operand: 1
+      on_bad: fail
+    any_of: []
+  options:
+    fire_mode: edge
+    min_interval_sec: 1.0
+  actions:
+  - id: relay4_off
+    type: mqtt_publish
+    sequential_order: 0
+    description: Выключить реле4
+    mqtt:
+      topic: /devices/unit180/controls/реле4/on
+      payload:
+        value: '0'
+      qos: 0
+      retain: false
+  - id: relay5_off
+    type: mqtt_publish
+    sequential_order: 1
+    description: Выключить реле5
+    mqtt:
+      topic: /devices/unit180/controls/реле5/on
+      payload:
+        value: '0'
+      qos: 0
+      retain: false
+  - id: log_relays45_off
+    type: log
+    sequential_order: 2
+    description: Лог выключения реле4 и реле5
+    log:
+      message: Выключили реле4 и реле5 по реле2
+      level: INFO
+      extra:
+        source_param: реле2
+- id: relay1_triggers_relay6
+  name: Запустить включение реле6 при включении реле1
+  status: enabled
+  description: Если реле1 == 1 — запуск правила relay6_on_action
+  virtual_tags: []
+  conditions:
+    all_of:
+    - tag: реле1
+      op: ==
+      operand: 1
+      on_bad: fail
+    any_of: []
+  options:
+    fire_mode: edge
+    min_interval_sec: 1.0
+  actions:
+  - id: run_relay6_rule
+    type: trigger_rule
+    sequential_order: 0
+    description: Запуск правила включения реле6
+    trigger:
+      rule_id: relay6_on_action
+      context:
+        source: relay1_triggers_relay6
+  - id: log_trigger
+    type: log
+    sequential_order: 1
+    description: Лог запуска relay6_on_action
+    log:
+      message: Запущено правило relay6_on_action по реле1
+      level: INFO
+      extra:
+        source_param: реле1
+- id: __2__6
+  name: при включении реле2 отключим реле6
+  status: enabled
+  description: Ну просто отключит реле6 когда реле2 вкл
+  virtual_tags: []
+  conditions:
+    all_of:
+    - tag: реле2
+      op: ==
+      operand: 1
+      on_bad: fail
+    any_of: []
+  options:
+    fire_mode: edge
+    min_interval_sec: 1.0
+  actions:
+  - id: rel2_rel6
+    type: mqtt_publish
+    delay_ms: 0
+    sequential_order: 0
+    mqtt:
+      topic: /devices/unit180/controls/реле6/on
+      payload: 0
+      qos: 0
+      retain: false
+- id: relay6_on_action
+  name: Включить реле6 (через trigger_rule)
+  status: disabled
+  description: Включает реле6; запускается только другим правилом
+  virtual_tags: []
+  condition: ''
+  options:
+    fire_mode: edge
+    min_interval_sec: 1.0
+  actions:
+  - id: relay6_on
+    type: mqtt_publish
+    sequential_order: 0
+    description: Включить реле6
+    mqtt:
+      topic: /devices/unit180/controls/реле6/on
+      payload:
+        value: '1'
+      qos: 0
+      retain: false
+  - id: log_relay6_on
+    type: log
+    sequential_order: 1
+    description: Лог включения реле6
+    log:
+      message: Включили реле6 по trigger_rule
+      level: INFO
+      extra:
+        reason: rеле1

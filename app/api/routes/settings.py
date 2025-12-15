@@ -269,14 +269,21 @@ def update_line(body: Dict[str, Any]):
     # поддерживаем оба формата: {name, updates:{...}} ИЛИ {name, device,...}
     updates = body.get("updates") or {
         k: body[k] for k in (
+            "transport",
             "device", "baudrate", "parity", "stopbits",
-            "timeout", "port_retry_backoff_s", "rs485_rts_toggle"
+            "timeout", "port_retry_backoff_s", "rs485_rts_toggle",
+            "host", "port"
         ) if k in body
     }
 
     for k, v in updates.items():
-        if k in ("device","baudrate","parity","stopbits","timeout","port_retry_backoff_s","rs485_rts_toggle"):
+        if k in (
+            "transport",
+            "device","baudrate","parity","stopbits","timeout","port_retry_backoff_s","rs485_rts_toggle",
+            "host","port"
+        ):
             line[k] = v
+
 
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}

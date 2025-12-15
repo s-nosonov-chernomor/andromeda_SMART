@@ -154,14 +154,21 @@ class ActionExecutor:
         topic = action.mqtt.topic
         payload = action.mqtt.payload
 
-        # если payload — словарь и есть контекст, можно подлить пару служебных полей
+        # Специальный случай: payload = {"value": "..."} → это команда управления
+        # Шлём ТОЛЬКО само значение, чтобы ModbusLine увидел "1"/"0", а не dict.
+        if isinstance(payload, dict) and "value" in payload:
+            value = payload["value"]
+            # можно при желании логировать context отдельно
+            self._mqtt_publish(topic, value)
+            return
+
+        # Остальные случаи — как раньше (общий MQTT)
         if isinstance(payload, dict):
             merged = dict(payload)
             if context:
                 merged.update({"ctx": context})
             self._mqtt_publish(topic, merged)
         else:
-            # строку публикуем как есть
             self._mqtt_publish(topic, payload)
 
     def _do_trigger_rule(self, action: Action, context: Optional[Dict[str, Any]]) -> None:
@@ -182,17 +189,51 @@ class ActionExecutor:
     def _do_log(self, action: Action, context: Optional[Dict[str, Any]]) -> None:
         """
         LOG-действие — это не то же самое, что запись в журнал выполнения действий.
-        Это "оперативный" лог/аудит, который ты можешь, например, вывести в отдельную таблицу.
-        Сейчас мы просто публикуем в MQTT под специальной темой, если публикацию дали.
+        Это "оперативный" лог/аудит...
         """
         if action.log is None:
             raise ValueError("log payload is not set for action")
 
-        # если есть MQTT — можно пульнуть туда
+        # --- 1) отправка в alerts_engine (Логи автоматики) ------------------
+        try:
+            from app.services.alerts_runtime import engine_instance
+        except Exception:
+            engine_instance = None
+
+        if engine_instance is not None:
+            try:
+                eng = engine_instance()
+            except Exception:
+                eng = None
+
+            if eng is not None:
+                # вынимаем source_param:
+                # приоритет: extra.source_param → context.source_param/source_tag/tag
+                src = None
+                if isinstance(action.log.extra, dict):
+                    src = action.log.extra.get("source_param")
+                if not src and context:
+                    src = (
+                        context.get("source_param")
+                        or context.get("source_tag")
+                        or context.get("tag")
+                    )
+
+                if src:
+                    ts_now = datetime.now().astimezone()
+                    eng.notify_automation_log(
+                        source_param=str(src),
+                        level=str(action.log.level or "INFO"),
+                        msg=str(action.log.message or ""),
+                        ts=ts_now,
+                        ctx=context or {},
+                    )
+
+        # --- 2) MQTT-лог, как было -----------------------------------------
         if self._mqtt_publish is not None:
             topic = "persay/rules/log"
             payload = {
-                "ts": datetime.utcnow().isoformat(),
+                "ts": datetime.now().astimezone().isoformat(timespec="milliseconds"),
                 "level": action.log.level,
                 "msg": action.log.message,
                 "extra": action.log.extra,
@@ -201,6 +242,7 @@ class ActionExecutor:
                 payload["ctx"] = context
             self._mqtt_publish(topic, payload)
         # если MQTT нет — просто тихо выходим
+
 
     # --------------------------------------------------------------------- #
     # ВСПОМОГАТЕЛЬНЫЕ -------------------------------------------------------

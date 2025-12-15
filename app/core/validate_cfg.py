@@ -169,18 +169,36 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
             raise ValueError(f"lines: имя линии '{name}' дублируется")
         seen_line_names.add(name)
 
-        # базовые поля линии
-        str(ln.get("device", ""))  # может быть пусто, заполняется позже через UI
-        _as_int(ln.get("baudrate", 9600), f"lines[{name}].baudrate", 1)
+        # transport: по умолчанию serial
+        transport = str(ln.get("transport") or "serial").strip().lower()
+        if transport not in ("serial", "tcp"):
+            raise ValueError(f"lines[{name}].transport: допустимо serial/tcp")
+
         _as_float(ln.get("timeout", 0.1), f"lines[{name}].timeout", 0.0)
-        if "parity" in ln and ln["parity"] not in (None, "N", "E", "O"):
-            raise ValueError(f"lines[{name}].parity: допустимо N/E/O")
-        if "stopbits" in ln:
-            _as_int(ln.get("stopbits", 1), f"lines[{name}].stopbits", 1, 2)
-        if "port_retry_backoff_s" in ln:
-            _as_int(ln.get("port_retry_backoff_s", 0), f"lines[{name}].port_retry_backoff_s", 0)
-        if "rs485_rts_toggle" in ln:
-            _as_bool(ln["rs485_rts_toggle"], f"lines[{name}].rs485_rts_toggle")
+
+        if transport == "tcp":
+            host = str(ln.get("host", "")).strip()
+            if not host:
+                raise ValueError(f"lines[{name}].host: обязателен для transport=tcp")
+            _as_int(ln.get("port", 502), f"lines[{name}].port", 1, 65535)
+
+            # эти поля для tcp не обязательны
+            if "port_retry_backoff_s" in ln:
+                _as_int(ln.get("port_retry_backoff_s", 0), f"lines[{name}].port_retry_backoff_s", 0)
+
+        else:
+            # serial
+            str(ln.get("device", ""))  # может быть пусто
+            _as_int(ln.get("baudrate", 9600), f"lines[{name}].baudrate", 1)
+            if "parity" in ln and ln["parity"] not in (None, "N", "E", "O"):
+                raise ValueError(f"lines[{name}].parity: допустимо N/E/O")
+            if "stopbits" in ln:
+                _as_int(ln.get("stopbits", 1), f"lines[{name}].stopbits", 1, 2)
+            if "port_retry_backoff_s" in ln:
+                _as_int(ln.get("port_retry_backoff_s", 0), f"lines[{name}].port_retry_backoff_s", 0)
+            if "rs485_rts_toggle" in ln:
+                _as_bool(ln["rs485_rts_toggle"], f"lines[{name}].rs485_rts_toggle")
+
 
         nodes = ln.get("nodes", [])
         if not isinstance(nodes, list):

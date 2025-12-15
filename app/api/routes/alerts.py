@@ -14,6 +14,9 @@ import yaml
 from app.services.alerts_engine import alerts_engine   # CHANGED: будем обращаться прямо к синглтону
 from app.services.alerts_runtime import engine_instance, ensure_started  # CHANGED
 from app.core.validate_alerts import validate_alerts_cfg
+from app.persay.runtime import rules_repo
+from app.persay.rules.types import ActionType
+
 
 router = APIRouter()
 
@@ -45,7 +48,7 @@ def get_enums():
     Enum-ы для UI.
     """
     return {
-        "flow_types": ["telegram", "ronet"],
+        "flow_types": ["telegram", "ronet", "automation_logs"],
     }
 
 
@@ -128,6 +131,62 @@ def reload_alerts_config():
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, f"reload failed: {e}")
+@router.get("/api/alerts/known_log_params")
+def list_known_log_params():
+    """
+    Вернуть список логических параметров автоматики (source_param)
+    из LOG-действий правил.
+    Формат элемента:
+      { "name": "реле3", "rules": ["Имя правила 1", ...], "levels": ["INFO", "ERROR"] }
+    """
+    repo = rules_repo()
+    if repo is None:
+        # движок правил ещё не поднят – вернём пусто
+        return []
+
+    by_name: dict[str, dict[str, set[str]]] = {}
+    for rule in repo.list_rules():
+        for act in (rule.actions or []):
+            # Аккуратно проверяем тип действия
+            try:
+                is_log = (getattr(act, "type", None) == ActionType.LOG) or (
+                    hasattr(act, "type") and getattr(act.type, "value", "") == "log"
+                )
+            except Exception:
+                is_log = False
+            if not is_log:
+                continue
+
+            log_payload = getattr(act, "log", None)
+            if not log_payload:
+                continue
+
+            extra = getattr(log_payload, "extra", None) or {}
+            if not isinstance(extra, dict):
+                continue
+
+            sp = extra.get("source_param")
+            if not sp:
+                continue
+
+            sp = str(sp)
+            level = getattr(log_payload, "level", "INFO") or "INFO"
+
+            item = by_name.setdefault(sp, {"rules": set(), "levels": set()})
+            item["rules"].add(rule.name or rule.id)
+            item["levels"].add(str(level))
+
+    result = []
+    for name, info in by_name.items():
+        result.append({
+            "name": name,
+            "rules": sorted(info["rules"]),
+            "levels": sorted(info["levels"]),
+        })
+
+    # для красоты отсортируем по имени
+    result.sort(key=lambda x: x["name"])
+    return result
 
 
 @router.get("/api/alerts/known_params")

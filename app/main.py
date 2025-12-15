@@ -38,6 +38,9 @@ from app.api.routes.service import router as service_router
 from app.api.routes.alerts import router as alerts_router
 from app.services.alerts_runtime import ensure_started as start_engine_if_needed, stop_if_running as stop_engine_if_running
 
+from app.persay.runtime import ensure_automation_started, rules_repo
+from app.persay.rules_loader import load_rules_from_yaml  # добавим в шаге 4
+from app.persay.api.rules_api import router as automation_router  # добавим в шаге 4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,36 +74,36 @@ app.include_router(journal_router, prefix="/api", tags=["journal"])  # даёт 
 app.include_router(settings_router, tags=["settings"])
 app.include_router(mock_router, tags=["mock"])
 app.include_router(andromeda_router, tags=["andromeda"])
-
 app.include_router(service_router, tags=["service"])
-
 app.include_router(alerts_router)
+app.include_router(automation_router)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Совместимость со «старыми» путями
 # ─────────────────────────────────────────────────────────────────────────────
 # Старт/стоп
-@app.on_event("startup")
-def _on_startup():
-    try:
-        start_engine_if_needed()
-    except Exception as e:
-        # логируйте по желанию
-        print("alerts engine start failed:", e)
+# @app.on_event("startup")
+# def _on_startup():
+#     try:
+#         start_engine_if_needed()
+#     except Exception as e:
+#         # логируйте по желанию
+#         print("alerts engine start failed:", e)
 
-@app.on_event("shutdown")
-def _on_shutdown():
-    try:
-        stop_engine_if_running()
-    except Exception:
-        pass
-@app.get("/login")
-def compat_login_page():
-    return RedirectResponse(url="/ui/login", status_code=302)
-
-@app.api_route("/api/login", methods=["POST"])
-async def compat_api_login():
-    # Старый клиент стучится сюда — пробрасываем на новый эндпоинт авторизации
-    return RedirectResponse(url="/api/auth/login", status_code=307)
+# @app.on_event("shutdown")
+# def _on_shutdown():
+#     try:
+#         stop_engine_if_running()
+#     except Exception:
+#         pass
+# @app.get("/login")
+# def compat_login_page():
+#     return RedirectResponse(url="/ui/login", status_code=302)
+#
+# @app.api_route("/api/login", methods=["POST"])
+# async def compat_api_login():
+#     # Старый клиент стучится сюда — пробрасываем на новый эндпоинт авторизации
+#     return RedirectResponse(url="/api/auth/login", status_code=307)
 
 # Корень: если не залогинен — на логин; иначе — на текущие
 @app.get("/")
@@ -147,6 +150,14 @@ def page_andromeda(request: Request, user: str = Depends(require_session)):
         {"request": request, "title": "Андромеда", "user": user},
     )
 
+@app.get("/automation", response_class=HTMLResponse)
+def page_automation(request: Request, user: str = Depends(require_session)):
+    return templates.TemplateResponse(
+        "automation.html",
+        {"request": request, "title": "Автоматика", "user": user},
+    )
+
+
 # Выход: чистим сессию и на логин
 @app.get("/logout")
 def page_logout(request: Request):
@@ -178,6 +189,27 @@ def _startup():
     except Exception as e:
         logging.getLogger("web").error("mqtt connect error (non-fatal): %s", e)
 
+    # >>> НОВОЕ: запускаем автоматику, даём ей доступ к mqtt_bridge
+    ensure_automation_started(mqtt_bridge)
+    # <<<
+
+    # запустить движок алертов
+    try:
+        start_engine_if_needed()
+    except Exception as e:
+        logging.getLogger("web").error("alerts engine start failed: %s", e)
+
+    # загрузить правила автоматики из отдельного YAML
+    repo = rules_repo()
+    if repo:
+        try:
+            load_rules_from_yaml("data/rules.yaml", repo)
+            logging.getLogger("web").info("automation rules loaded from data/rules.yaml")
+        except FileNotFoundError:
+            logging.getLogger("web").warning("data/rules.yaml not found, automation rules empty")
+        except Exception as e:
+            logging.getLogger("web").error("automation rules load failed: %s", e)
+
     start_lines(settings.get_cfg(), mqtt_bridge)
 
     app.state.mqtt_bridge = mqtt_bridge
@@ -186,6 +218,10 @@ def _startup():
 @app.on_event("shutdown")
 def _shutdown():
     stop_lines()
+    try:
+        stop_engine_if_running()
+    except Exception:
+        pass
 
 @app.get("/.well-known/appspecific/com.chrome.devtools.json")
 def _chrome_devtools_probe():

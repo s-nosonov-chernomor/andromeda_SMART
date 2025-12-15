@@ -90,10 +90,14 @@ def validate_alerts_cfg(cfg: Dict[str, Any]) -> None:
             raise ValueError(f"{fpath}.name: обязателен")
 
         # type
+        # type
         t = flow.get("type", "telegram")
         t = _require_str(t, f"{fpath}.type", allow_empty=False).lower()
-        if t not in ("telegram", "ronet"):
-            raise ValueError(f"{fpath}.type: допустимые значения: telegram | ronet")
+        if t not in ("telegram", "ronet", "automation_logs"):
+            raise ValueError(
+                f"{fpath}.type: допустимые значения: telegram | ronet | automation_logs"
+            )
+
 
         # enabled
         if "enabled" in flow:
@@ -117,8 +121,43 @@ def validate_alerts_cfg(cfg: Dict[str, Any]) -> None:
         elif t == "ronet":
             rn = opts.get("ronet", {})
             rn = _require_dict(rn, f"{fpath}.options.ronet")
-            if "endpoint_url" in rn:
-                _require_str(rn["endpoint_url"], f"{fpath}.options.ronet.endpoint_url", allow_empty=True)
+
+            # MQTT connection
+            if "broker_host" in rn:
+                _require_str(rn["broker_host"], f"{fpath}.options.ronet.broker_host", allow_empty=True)
+
+            if "broker_port" in rn:
+                _require_int_ge0(rn["broker_port"], f"{fpath}.options.ronet.broker_port")  # 1883, 8883 и т.п.
+
+            if "username" in rn:
+                _require_str(rn["username"], f"{fpath}.options.ronet.username", allow_empty=True)
+
+            if "password" in rn:
+                _require_str(rn["password"], f"{fpath}.options.ronet.password", allow_empty=True)
+
+            if "client_id" in rn:
+                _require_str(rn["client_id"], f"{fpath}.options.ronet.client_id", allow_empty=True)
+
+            if "topic" in rn:
+                _require_str(rn["topic"], f"{fpath}.options.ronet.topic", allow_empty=True)
+
+            if "qos" in rn:
+                q = _require_int_ge0(rn["qos"], f"{fpath}.options.ronet.qos")
+                if q not in (0, 1, 2):
+                    raise ValueError(f"{fpath}.options.ronet.qos: допустимо 0|1|2")
+
+            if "retain" in rn and not isinstance(rn["retain"], bool):
+                raise ValueError(f"{fpath}.options.ronet.retain: должен быть bool")
+
+            # UM/device meta (могут быть пустыми — UI заполнит)
+            for k in ("um_name", "um_serial", "um_fw", "measure",
+                      "device_serial", "device_model"):
+                if k in rn:
+                    _require_str(rn[k], f"{fpath}.options.ronet.{k}", allow_empty=True)
+
+            for k in ("device_id", "meter", "device_type", "tz_offset_minutes"):
+                if k in rn:
+                    _require_int_ge0(rn[k], f"{fpath}.options.ronet.{k}")
 
         # params
         params = _require_list(flow.get("params", []), f"{fpath}.params")
@@ -131,11 +170,24 @@ def validate_alerts_cfg(cfg: Dict[str, Any]) -> None:
             if key is None:
                 raise ValueError(f"{ppath}.key: обязателен")
             key = _require_str(key, f"{ppath}.key", allow_empty=False)
-            if not _key_format_ok(key):
-                raise ValueError(f"{ppath}.key: ожидается формат 'line|unit_id|param'")
+
+            if t in ("telegram", "ronet"):
+                # старое поведение: ожидаем "line|unit_id|param"
+                if not _key_format_ok(key):
+                    raise ValueError(
+                        f"{ppath}.key: ожидается формат 'line|unit_id|param'"
+                    )
+            else:
+                # automation_logs: просто строка, главное — уникальная в пределах потока
+                if "|" in key:
+                    # чисто чтобы не путаться глазами, можно запретить,
+                    # но можно и не запрещать — на твой вкус
+                    pass
+
             if key in keys_in_flow:
                 raise ValueError(f"{ppath}.key: дубликат ключа в пределах потока")
             keys_in_flow.add(key)
+
 
             if "alias" in p:
                 _require_str(p["alias"], f"{ppath}.alias", allow_empty=True)
@@ -187,8 +239,11 @@ def validate_alerts_cfg(cfg: Dict[str, Any]) -> None:
                 if not isinstance(v, (str, int, float, bool)):
                     raise ValueError(f"{epath}.value: должен быть строкой/числом/bool")
 
-        _validate_section("events")
-        _validate_section("intervals")
+        # Для обычных потоков events/intervals обязательны,
+        # для automation_logs — полностью игнорируем
+        if t in ("telegram", "ronet"):
+            _validate_section("events")
+            _validate_section("intervals")
 
 
 __all__ = ["validate_alerts_cfg"]

@@ -117,8 +117,10 @@
   async function apiJson(url, opts={}){ const r = await fetch(url, opts); if(!r.ok) throw new Error(await r.text().catch(()=> r.statusText)); const ct=r.headers.get('content-type')||''; return ct.includes('application/json')? r.json() : r.text(); }
 
   let ENUMS = { flow_types: [] };
-  let KNOWN = []; // [{line,unit_id,object,name}]
+  let KNOWN = [];      // реальные параметры опроса
+  let LOG_PARAMS = []; // source_param из автоматики (rules.yaml)
   let CFG   = { flows: [] };
+
 
   // ───────── helpers: keys, lookups ─────────
   const keyOf = (p)=> `${p.line}|${p.unit_id}|${p.name}`;
@@ -130,8 +132,37 @@
     f.type = f.type || 'telegram';
     f.enabled = (f.enabled !== false);
     f.options = f.options || {};
-    if(f.type === 'telegram'){ f.options.telegram = f.options.telegram || { bot_token:'', chat_id:'' }; }
-    if(f.type === 'ronet'){    f.options.ronet    = f.options.ronet    || { endpoint_url:'' }; }
+
+    if(f.type === 'telegram'){
+      f.options.telegram = f.options.telegram || { bot_token:'', chat_id:'' };
+    }
+    if(f.type === 'ronet'){
+      f.options.ronet = f.options.ronet || {
+        broker_host: '',
+        broker_port: 1883,
+        username: '',
+        password: '',
+        client_id: 'uspd-ronet',
+        topic: 'service/umsmart/out/meter/data/post',
+        qos: 0,
+        retain: false,
+
+        um_name: 'UM SMART',
+        um_serial: '',
+        um_fw: '',
+        measure: 'aMonth',
+
+        device_id: 1,
+        meter: 1,
+        device_serial: '',
+        device_model: '',
+        device_type: 42,
+
+        tz_offset_minutes: 0,
+      };
+
+    }
+
     f.params = (f.params || []).map(p => ({
       key: p.key || '',
       alias: p.alias || '',
@@ -140,6 +171,7 @@
       tolerance: (p.tolerance ?? null),
       ok_text: p.ok_text || 'в норме',
       alarm_text: p.alarm_text || 'авария',
+      tag: p.tag || '',
     }));
     f.events = f.events || {};
     f.events.group_window_s = parseInt(f.events.group_window_s || 10,10);
@@ -165,9 +197,13 @@
       card.className = 'card flow-card';
       card.dataset.idx = idx;
 
+      const isTelegram = flow.type === 'telegram';
+      const isRonet    = flow.type === 'ronet';
+      const isLog      = flow.type === 'automation_logs';
+
       // options body (type-specific)
       const telegramBox = `
-        <div class="kv" data-opt="telegram" style="${flow.type==='telegram'?'':'display:none'}">
+        <div class="kv" data-opt="telegram" style="${(isTelegram || isLog)?'':'display:none'}">
           <div>
             <label class="label" title="Токен бота, полученный у @BotFather">Telegram: bot_token</label>
             <input class="input" data-bind="options.telegram.bot_token" placeholder="1234567:AAA...." value="${esc(flow.options.telegram?.bot_token || '')}">
@@ -180,30 +216,182 @@
           </div>
         </div>`;
 
+      const ronet = flow.options.ronet || {};
       const ronetBox = `
         <div class="kv" data-opt="ronet" style="${flow.type==='ronet'?'':'display:none'}">
+
           <div>
-            <label class="label" title="Endpoint, куда отправлять оповещения">RO.NET: endpoint_url</label>
-            <input class="input" data-bind="options.ronet.endpoint_url" placeholder="https://host/path" value="${esc(flow.options.ronet?.endpoint_url || '')}">
-            <div class="hint">Формат и авторизация уточняются; пока одно поле.</div>
+            <label class="label" title="Адрес внешнего MQTT брокера">MQTT broker_host</label>
+            <input class="input" data-bind="options.ronet.broker_host"
+                   placeholder="mqtt.example.com"
+                   value="${esc(ronet.broker_host || '')}">
+            <div class="hint">Например: 10.10.10.10 или mqtt.example.com</div>
           </div>
+
+          <div>
+            <label class="label" title="Порт MQTT">MQTT broker_port</label>
+            <input class="input" type="number" min="1" step="1"
+                   data-bind="options.ronet.broker_port"
+                   value="${Number(ronet.broker_port ?? 1883)}">
+          </div>
+
+          <div>
+            <label class="label" title="Логин для внешнего MQTT (если нужен)">MQTT username</label>
+            <input class="input" data-bind="options.ronet.username"
+                   placeholder="user"
+                   value="${esc(ronet.username || '')}">
+          </div>
+
+          <div>
+            <label class="label" title="Пароль для внешнего MQTT (если нужен)">MQTT password</label>
+            <input class="input" type="password" data-bind="options.ronet.password"
+                   placeholder="••••••"
+                   value="${esc(ronet.password || '')}">
+          </div>
+
+          <div>
+            <label class="label" title="ClientID для подключения к внешнему MQTT">MQTT client_id</label>
+            <input class="input" data-bind="options.ronet.client_id"
+                   placeholder="uspd-ronet"
+                   value="${esc(ronet.client_id || 'uspd-ronet')}">
+          </div>
+
+          <div>
+            <label class="label" title="Топик, куда публикуем UM SMART JSON">MQTT topic</label>
+            <input class="input" data-bind="options.ronet.topic"
+                   placeholder="service/umsmart/out/meter/data/post"
+                   value="${esc(ronet.topic || 'service/umsmart/out/meter/data/post')}">
+          </div>
+
+          <div>
+            <label class="label" title="QoS публикации">MQTT qos</label>
+            <input class="input" type="number" min="0" max="2" step="1"
+                   data-bind="options.ronet.qos"
+                   value="${Number(ronet.qos ?? 0)}">
+          </div>
+
+          <div>
+            <label class="label" title="Retain публикации">MQTT retain</label>
+            <label class="pill">
+              <input type="checkbox" data-bind="options.ronet.retain" ${ronet.retain ? 'checked' : ''}>
+              <span style="margin-left:6px;">retain</span>
+            </label>
+          </div>
+
+          <div>
+            <label class="label">UM name</label>
+            <input class="input" data-bind="options.ronet.um_name"
+                   placeholder="UM SMART"
+                   value="${esc(ronet.um_name || 'UM SMART')}">
+          </div>
+
+          <div>
+            <label class="label">UM serial</label>
+            <input class="input" data-bind="options.ronet.um_serial"
+                   placeholder="200001159701"
+                   value="${esc(ronet.um_serial || '')}">
+          </div>
+
+          <div>
+            <label class="label">UM firmware</label>
+            <input class="input" data-bind="options.ronet.um_fw"
+                   placeholder="33965"
+                   value="${esc(ronet.um_fw || '')}">
+          </div>
+
+          <div>
+            <label class="label">Measure</label>
+            <input class="input" data-bind="options.ronet.measure"
+                   placeholder="aMonth"
+                   value="${esc(ronet.measure || 'aMonth')}">
+          </div>
+
+          <div>
+            <label class="label">Часовой сдвиг, мин</label>
+            <input class="input" type="number" step="1"
+                   data-bind="options.ronet.tz_offset_minutes"
+                   value="${Number(ronet.tz_offset_minutes ?? 0)}">
+            <div class="hint">Например, 180 для +03:00.</div>
+          </div>
+
+          <div>
+            <label class="label">Device ID</label>
+            <input class="input" type="number" data-bind="options.ronet.device_id"
+                   value="${Number(ronet.device_id ?? 1)}">
+          </div>
+
+          <div>
+            <label class="label">Meter</label>
+            <input class="input" type="number" data-bind="options.ronet.meter"
+                   value="${Number(ronet.meter ?? ronet.device_id ?? 1)}">
+          </div>
+
+          <div>
+            <label class="label">Device serial</label>
+            <input class="input" data-bind="options.ronet.device_serial"
+                   placeholder="48079623"
+                   value="${esc(ronet.device_serial || '')}">
+          </div>
+
+          <div>
+            <label class="label">Device model</label>
+            <input class="input" data-bind="options.ronet.device_model"
+                   placeholder="Mercury 234 X"
+                   value="${esc(ronet.device_model || '')}">
+          </div>
+
+          <div>
+            <label class="label">Device type</label>
+            <input class="input" type="number" data-bind="options.ronet.device_type"
+                   value="${Number(ronet.device_type ?? 42)}">
+          </div>
+
         </div>`;
 
-      // params list
-      const paramsRows = flow.params.map((p,pi)=>`
-        <tr data-pi="${pi}">
-          <td class="mono">${esc(p.key)}</td>
-          <td>${esc(p.alias)}</td>
-          <td>${esc(p.path)}</td>
-          <td class="right">${p.nominal==null?'':esc(p.nominal)}</td>
-          <td class="right">${p.tolerance==null?'':esc(p.tolerance)}</td>
-          <td>${esc(p.ok_text)}</td>
-          <td>${esc(p.alarm_text)}</td>
-          <td class="right">
-            <button class="btn btn-ghost btn-edit-param">Ред.</button>
-            <button class="btn btn-danger btn-del-param">Удалить</button>
-          </td>
-        </tr>`).join('');
+
+      let paramsRows = '';
+      if (isLog) {
+        // Логи автоматики: только key / alias / path
+        paramsRows = flow.params.map((p,pi)=>`
+          <tr data-pi="${pi}">
+            <td class="mono">${esc(p.key)}</td>
+            <td>${esc(p.alias)}</td>
+            <td>${esc(p.path)}</td>
+            <td class="right">
+              <button class="btn btn-ghost btn-edit-param">Ред.</button>
+              <button class="btn btn-danger btn-del-param">Удалить</button>
+            </td>
+          </tr>`).join('');
+      } else {
+        // Обычные потоки
+        paramsRows = flow.params.map((p,pi)=>`
+          <tr data-pi="${pi}">
+            <td class="mono">${esc(p.key)}</td>
+            <td>${esc(p.alias)}</td>
+            <td>${esc(p.path)}</td>
+
+            <td class="right">
+              ${isRonet
+                ? `<input class="input" style="max-width:90px;"
+                          data-bind-param="tag"
+                          data-idx="${pi}"
+                          value="${esc(p.tag || '')}"
+                          placeholder="A+0">`
+                : ''}
+            </td>
+
+            <td class="right">${p.nominal==null?'':esc(p.nominal)}</td>
+            <td class="right">${p.tolerance==null?'':esc(p.tolerance)}</td>
+            <td>${esc(p.ok_text)}</td>
+            <td>${esc(p.alarm_text)}</td>
+            <td class="right">
+              <button class="btn btn-ghost btn-edit-param">Ред.</button>
+              <button class="btn btn-danger btn-del-param">Удалить</button>
+            </td>
+          </tr>`).join('');
+      }
+
+
 
       // selections as tags
       const tags = (sel)=> sel.map(k=>{
@@ -295,41 +483,77 @@
           <div class="table-wrap">
             <table class="table-mini">
               <thead>
-                <tr>
-                  <th>Имя (ключ)</th>
-                  <th>Имя в сообщении</th>
-                  <th>Расположение</th>
-                  <th class="right">Номинал</th>
-                  <th class="right">Погрешн.</th>
-                  <th>Норма</th>
-                  <th>Авария</th>
-                  <th class="right">Действия</th>
-                </tr>
+                ${isLog ? `
+                  <tr>
+                    <th>Имя (ключ)</th>
+                    <th>Имя в сообщении</th>
+                    <th>Расположение</th>
+                    <th class="right">Действия</th>
+                  </tr>
+                ` : `
+                  <tr>
+                    <th>Имя (ключ)</th>
+                    <th>Имя в сообщении</th>
+                    <th>Расположение</th>
+                    <th class="right">Тег (RONET)</th>
+                    <th class="right">Номинал</th>
+                    <th class="right">Погрешн.</th>
+                    <th>Норма</th>
+                    <th>Авария</th>
+                    <th class="right">Действия</th>
+                  </tr>
+                `}
               </thead>
-              <tbody>${paramsRows || `<tr><td colspan="8" class="hint">Параметров пока нет.</td></tr>`}</tbody>
+
+              <tbody>${paramsRows || `<tr><td colspan="${isLog ? 4 : 9}" class="hint">Параметров пока нет.</td></tr>`}</tbody>
+
             </table>
           </div>
         </div>
 
+        ${isLog ? '' : `
         <div class="grid cols-2" style="margin-top:12px;">
           ${eventsCard}
           ${intervalsCard}
         </div>
+        `}
+
       `;
 
       // bind value changes
       card.addEventListener('input', (ev)=>{
         const el = ev.target;
         const bind = el.getAttribute('data-bind');
-        if(!bind) return;
-        const path = bind.split('.');
-        setByPath(flow, path, valueFromInput(el));
-        // toggle type boxes
-        if(bind==='type'){
-          card.querySelector('[data-opt="telegram"]').style.display = (flow.type==='telegram'?'':'none');
-          card.querySelector('[data-opt="ronet"]').style.display = (flow.type==='ronet'?'':'none');
+        const bindParam = el.getAttribute('data-bind-param');
+
+        // 1) обычные поля (data-bind="...")
+        if (bind) {
+          const path = bind.split('.');
+          setByPath(flow, path, valueFromInput(el));
+
+          if(bind==='type'){
+            const isTg  = flow.type === 'telegram' || flow.type === 'automation_logs';
+            const isRn  = flow.type === 'ronet';
+            const tgBox = card.querySelector('[data-opt="telegram"]');
+            const rnBox = card.querySelector('[data-opt="ronet"]');
+            if (tgBox) tgBox.style.display = isTg ? '' : 'none';
+            if (rnBox) rnBox.style.display = isRn ? '' : 'none';
+            render();
+          }
+          return;
+        }
+
+        // 2) поля параметров (data-bind-param="tag")
+        if (bindParam === 'tag') {
+          const idx = +el.getAttribute('data-idx');
+          if (!Number.isNaN(idx) && flow.params[idx]) {
+            flow.params[idx].tag = el.value.trim();
+          }
+          return;
         }
       });
+
+
 
       // actions
       card.addEventListener('click', (ev)=>{
@@ -475,12 +699,47 @@
   function openParamModal(flowIdx, paramIdx){
     PM_CTX = {flowIdx, paramIdx};
     const flow = CFG.flows[flowIdx];
-    // fill select
-    pmKey.innerHTML = KNOWN.map(p=> `<option value="${esc(keyOf(p))}">${esc(labelOf(p))}</option>`).join('');
+    const isLogFlow = (flow.type === 'automation_logs');
+
+    // 1) источник данных для "Имя (из конфигурации)"
+    if (isLogFlow) {
+      // Берём source_param из LOG_PARAMS
+      if (LOG_PARAMS.length === 0) {
+        pmKey.innerHTML = '';
+      } else {
+        pmKey.innerHTML = LOG_PARAMS.map(p => {
+          const name = esc(p.name);
+          const hint = (p.rules && p.rules.length)
+            ? ` (правила: ${p.rules.join(', ')})`
+            : '';
+          return `<option value="${name}">${name}${hint}</option>`;
+        }).join('');
+      }
+    } else {
+      // Старое поведение — реальные параметры из опроса
+      pmKey.innerHTML = KNOWN.map(p=> `<option value="${esc(keyOf(p))}">${esc(labelOf(p))}</option>`).join('');
+    }
+
+    // 2) спрятать лишние поля для лог-потока
+    const nomWrap   = pmNominal.closest('div');
+    const tolWrap   = pmTol.closest('div');
+    const okWrap    = pmOkText.closest('div');
+    const alarmWrap = pmAlarmText.closest('div');
+
+    [nomWrap, tolWrap, okWrap, alarmWrap].forEach(w => {
+      if (!w) return;
+      w.style.display = isLogFlow ? 'none' : '';
+    });
+
+    // 3) заполнение полей, как раньше
     if(paramIdx==null){
       $('#paramTitle').textContent = 'Добавить параметр';
-      pmAlias.value = ''; pmPath.value=''; pmNominal.value=''; pmTol.value='';
-      pmOkText.value='в норме'; pmAlarmText.value='авария';
+      pmAlias.value = '';
+      pmPath.value='';
+      pmNominal.value = '';
+      pmTol.value     = '';
+      pmOkText.value    = 'в норме';
+      pmAlarmText.value = 'авария';
       pmKey.value = pmKey.options[0]?.value || '';
     }else{
       $('#paramTitle').textContent = 'Редактировать параметр';
@@ -493,27 +752,58 @@
       pmOkText.value = p.ok_text || 'в норме';
       pmAlarmText.value = p.alarm_text || 'авария';
     }
+
     pm.setAttribute('aria-hidden','false');
   }
+
+
   function closeParamModal(){ pm.setAttribute('aria-hidden','true'); PM_CTX=null; }
   $('#pmClose').onclick = closeParamModal;
   $('#pmCancel').onclick = closeParamModal;
   $('#pmSave').onclick = ()=>{
     const flow = CFG.flows[PM_CTX.flowIdx];
+    const isLogFlow = (flow.type === 'automation_logs');
+
+    const oldKey = (PM_CTX.paramIdx==null) ? null : (flow.params[PM_CTX.paramIdx]?.key || null);
+
     const item = {
       key: pmKey.value,
       alias: pmAlias.value.trim(),
       path: pmPath.value.trim(),
+
+      // эти поля нужны только НЕ для лог-потока, но можно оставить — движок их пережуёт
       nominal: (pmNominal.value===''? null : +pmNominal.value),
       tolerance: (pmTol.value===''? null : +pmTol.value),
       ok_text: pmOkText.value.trim() || 'в норме',
       alarm_text: pmAlarmText.value.trim() || 'авария',
     };
+
     if(!item.key){ showToast('Выберите «Имя (из конфигурации)»'); return; }
-    if(PM_CTX.paramIdx==null) flow.params.push(item);
-    else flow.params[PM_CTX.paramIdx] = item;
-    closeParamModal(); render();
+
+    if(PM_CTX.paramIdx==null) {
+      flow.params.push(item);
+    } else {
+      flow.params[PM_CTX.paramIdx] = { ...(flow.params[PM_CTX.paramIdx]||{}), ...item };
+    }
+
+    // ✅ Если key изменился — обновляем все ссылки в selected/exceptions
+    if (oldKey && oldKey !== item.key) {
+      const replaceKey = (k)=> (k === oldKey ? item.key : k);
+
+      if (flow.events) {
+        flow.events.selected = (flow.events.selected || []).map(replaceKey);
+        flow.events.exceptions = (flow.events.exceptions || []).map(e => ({...e, key: replaceKey(e.key)}));
+      }
+      if (flow.intervals) {
+        flow.intervals.selected = (flow.intervals.selected || []).map(replaceKey);
+        flow.intervals.exceptions = (flow.intervals.exceptions || []).map(e => ({...e, key: replaceKey(e.key)}));
+      }
+    }
+
+    closeParamModal();
+    render();
   };
+
   pm.addEventListener('click', (e)=>{ if(e.target===pm) closeParamModal(); });
 
   // ───────── modal: pick params for events/intervals ─────────
@@ -552,7 +842,12 @@
   function esc(s){ return String(s||'').replace(/[&<>"']/g, m=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m])); }
   function setByPath(obj, path, val){ let o=obj; for(let i=0;i<path.length-1;i++){ const k=path[i]; o[k] = (o[k]??{}); o=o[k]; } o[path[path.length-1]] = val; }
   function valueFromInput(el){ if(el.type==='checkbox') return el.checked; const v=el.value; const n=Number(v); return (el.type==='number' && !isNaN(n))? n : v; }
-  function typeLabel(t){ return t==='telegram'?'Телеграм' : (t==='ronet'?'RO.NET':t); }
+  function typeLabel(t){
+    if (t === 'telegram') return 'Телеграм';
+    if (t === 'ronet') return 'RO.NET';
+    if (t === 'automation_logs') return 'Логи автоматики';
+    return t;
+  }
   function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=((h<<5)-h)+s.charCodeAt(i); h|=0; } return (h>>>0).toString(36); }
   function promptPickKey(flow, scope, current=null){
     const avail = flow[scope].selected && flow[scope].selected.length? flow[scope].selected : flow.params.map(p=>p.key);
@@ -611,13 +906,24 @@
   // ───────── data bootstrap ─────────
   async function loadAll(){
     ENUMS = await apiJson('/api/alerts/enums');
+
     KNOWN = await apiJson('/api/alerts/known_params');
-    // нормализуем KNOWN к единому виду (на всякий случай)
-    KNOWN = Array.isArray(KNOWN)? KNOWN.map(x=>({ line: x.line, unit_id: +x.unit_id, object: x.object || '', name: x.name })) : [];
+    KNOWN = Array.isArray(KNOWN)
+      ? KNOWN.map(x=>({ line: x.line, unit_id: +x.unit_id, object: x.object || '', name: x.name }))
+      : [];
+
+    // НОВОЕ: лог-параметры (source_param из rules.yaml)
+    LOG_PARAMS = await apiJson('/api/alerts/known_log_params');
+    LOG_PARAMS = Array.isArray(LOG_PARAMS)
+      ? LOG_PARAMS.map(x => ({ name: x.name, rules: x.rules || [], levels: x.levels || [] }))
+      : [];
+
     CFG = await apiJson('/api/alerts/config');
     if(!CFG || typeof CFG!=='object') CFG = { flows: [] };
     render();
   }
+
+
 
   loadAll().catch(e=> showToast('Ошибка инициализации: '+e.message));
 })();
