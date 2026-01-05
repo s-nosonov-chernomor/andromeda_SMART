@@ -43,10 +43,31 @@ class MqttBridge:
         self.client.on_connect = _on_connect
         self.client.on_message = self._on_message  # см. метод ниже
 
-        self.base = conf.get("base_topic", "/devices").rstrip("/")
-        if not self.base.startswith("/"): self.base = "/" + self.base
+        self.base = str(conf.get("base_topic", "devices") or "").strip()
+        # ничего не приписываем! пользователь может дать "/devices" или "devices"
+        self.base = self.base.rstrip("/")  # только хвостовой слэш уберем
+
         self.qos = int(conf.get("qos", 0)); self.retain = bool(conf.get("retain", False))
         self.out_queue = queue.Queue()
+
+    def _join_topic(self, base: str, tail: str) -> str:
+        base = (base or "").strip()
+        tail = (tail or "").strip()
+
+        if not base:
+            return tail
+        if not tail:
+            return base
+
+        # сохраняем ведущий "/" у base, если он есть
+        base_has_leading = base.startswith("/")
+
+        base_norm = base.strip("/")  # чистим края для склейки
+        tail_norm = tail.strip("/")
+
+        joined = f"{base_norm}/{tail_norm}"
+
+        return f"/{joined}" if base_has_leading else joined
 
     def connect(self):
         # не валим процесс, если брокер недоступен
@@ -59,7 +80,24 @@ class MqttBridge:
         threading.Thread(target=self._publisher_loop, daemon=True).start()
 
     def publish(self, topic_like: str, value, code: int = 0, status_details: Optional[dict] = None, context: Optional[dict] = None):
-        topic = topic_like if topic_like.startswith("/") else f"{self.base}/{topic_like}"
+
+        ctx = context or {}
+
+        # 1) если пользователь явно задал topic у параметра — используем ровно его
+        explicit = str(ctx.get("topic", "") or "").strip()
+        if explicit:
+            topic = explicit
+        else:
+            # 2) иначе — строим из base_topic и topic_like
+            if str(topic_like or "").strip().startswith("/"):
+                # абсолютный “как есть”
+                topic = str(topic_like).strip()
+            else:
+                topic = self._join_topic(self.base, str(topic_like or "").strip())
+
+        # легкая косметика: убрать двойные // внутри (но ведущий "/" не ломаем)
+        while "//" in topic:
+            topic = topic.replace("//", "/")
 
         meta = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z"),
@@ -87,21 +125,25 @@ class MqttBridge:
         self.out_queue.put((topic, payload, context or {}))
 
     def register_on_topic(self, topic: str, handler: Callable[[str], bool]) -> None:
-        """
-        Регистрируем обработчик для команды записи.
-        topic может быть относительным — тогда префиксуем base_topic.
-        handler получает строковое payload (как есть).
-        """
-        if not topic.startswith("/"):
-            topic = f"{self.base}/{topic}".replace("//", "/")
+        t = str(topic or "").strip()
+        if not t:
+            return
+
+        # если topic передан уже как готовый — не приписываем base_topic автоматически
+        # НО: если ты сюда передаешь относительные хвосты (как раньше), оставим поддержку:
+        if not t.startswith("/") and self.base:
+            t = self._join_topic(self.base, t)
+
+        while "//" in t:
+            t = t.replace("//", "/")
+
         with self._lock:
-            self._handlers[topic] = handler
+            self._handlers[t] = handler
         try:
-            self.client.subscribe(topic, qos=self.qos)
-            log.info(f"[mqtt] subscribed: {topic}")
+            self.client.subscribe(t, qos=self.qos)
+            log.info(f"[mqtt] subscribed: {t}")
         except Exception as e:
-            # если ещё не подключены — подпишемся в on_connect
-            log.debug(f"[mqtt] subscribe deferred for {topic}: {e}")
+            log.debug(f"[mqtt] subscribe deferred for {t}: {e}")
 
     def unregister_on_topic(self, topic: str) -> None:
         if not topic.startswith("/"):

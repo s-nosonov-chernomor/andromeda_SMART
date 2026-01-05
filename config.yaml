@@ -22,7 +22,7 @@ backups:
   dir: ./data/backups
   keep: 10
 serial:
-  echo: false
+  echo: true
 addressing:
   normalize: false
 service:
@@ -32,7 +32,6 @@ andromeda:
   restart_cmd: /usr/local/bin/restart-andromeda.sh
 current:
   touch_read_every_s: 3
-  precision_decimals: 0
 polling:
   interval_ms: 1000
   jitter_ms: 120
@@ -45,7 +44,7 @@ polling:
     max_registers: 60
 lines:
 - name: line1
-  device: COM4
+  device: /dev/ttyUSB3
   baudrate: 115200
   timeout: 0.1
   parity: N
@@ -54,34 +53,42 @@ lines:
   rs485_rts_toggle: false
   nodes:
   - unit_id: 224
+    params: []
+    object: unit180
+    num_object: null
+  - unit_id: 68
+    object: pele_svet
+    params: []
+  - unit_id: 101
+    object: pele_boyler
     params:
-    - name: реле1
+    - name: закрыть воду
       register_type: coil
-      address: 0
+      address: 16
       words: 1
       data_type: u16
       word_order: AB
       scale: 1
       mode: rw
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
       step: null
       hysteresis: null
-    - name: реле2
+    - name: открыть воду
       register_type: coil
-      address: 1
+      address: 17
       words: 1
       data_type: u16
       word_order: AB
       scale: 1
       mode: rw
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
       step: null
       hysteresis: null
-    - name: реле3
+    - name: Насос питание
       register_type: coil
       address: 2
       words: 1
@@ -90,11 +97,11 @@ lines:
       scale: 1
       mode: rw
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
       step: null
       hysteresis: null
-    - name: реле4
+    - name: Компрессор питание
       register_type: coil
       address: 3
       words: 1
@@ -103,35 +110,197 @@ lines:
       scale: 1
       mode: rw
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
       step: null
       hysteresis: null
-    - name: реле5
+    - name: Водоочистка
       register_type: coil
       address: 4
       words: 1
       data_type: u16
       word_order: AB
       scale: 1
-      mode: rw
+      mode: r
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
-      step: 1
-      hysteresis: 1
-    - name: реле6
+      step: null
+      hysteresis: null
+  transport: serial
+- name: line2
+  device: /dev/ttyUSB2
+  baudrate: 115200
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 1
+  rs485_rts_toggle: false
+  nodes:
+  - unit_id: 81
+    object: Температура бойлерная
+    params:
+    - name: Температура бойлерная
+      register_type: input
+      address: 0
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+    - name: Влажность бойлерная
+      register_type: input
+      address: 1
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+  - unit_id: 228
+    object: Davlenie_voda
+    params:
+    - name: кан1
+      register_type: input
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+  - unit_id: 240
+    object: Davlenie_otoplenie
+    params: []
+  - unit_id: 125
+    object: Schetchik_dom
+    params:
+    - name: скорость счетчик дом
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+  transport: serial
+- name: line_banya
+  transport: tcp
+  host: 192.168.7.11
+  port: 23
+  timeout: 1
+  nodes:
+  - unit_id: 1
+    object: datchik_T_H
+    params:
+    - name: Температура бани
+      register_type: holding
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: 30
+      hysteresis: 5
+    - name: Влажность бани
+      register_type: holding
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: 30
+      hysteresis: 5
+  - unit_id: 69
+    object: Rele_shtora
+    params:
+    - name: Штору закрыть
       register_type: coil
-      address: 5
+      address: 17
       words: 1
       data_type: u16
       word_order: AB
       scale: 1
       mode: rw
       publish_mode: on_change_and_interval
-      publish_interval_s: 100
+      publish_interval_s: 3600
       topic: null
       step: null
       hysteresis: null
-    object: unit180
+    - name: Штору открыть
+      register_type: coil
+      address: 16
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+    num_object: null
+  port_retry_backoff_s: 5
+- name: line_masterskaya
+  transport: tcp
+  host: 192.168.7.10
+  port: 23
+  timeout: 1.0
+  nodes:
+  - unit_id: 187
+    object: scetchik_vvod
+    params:
+    - name: скорость счетчика
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
+    - name: адрес счетчика
+      register_type: holding
+      address: 128
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600
+      topic: null
+      step: null
+      hysteresis: null
     num_object: null

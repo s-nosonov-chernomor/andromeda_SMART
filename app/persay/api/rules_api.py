@@ -271,7 +271,7 @@ class LogDTO(BaseModel):
 
 class RuleOptionsDTO(BaseModel):
     fire_mode: str = "edge"
-    min_interval_sec: float | None = None
+    min_interval_sec: float or None = None
 
 class ActionFullDTO(BaseModel):
     id: Optional[str] = None
