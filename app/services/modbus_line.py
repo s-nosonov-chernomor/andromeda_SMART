@@ -126,12 +126,12 @@ class ModbusLine(threading.Thread):
         self.log = logging.getLogger(f"line.{self.name_}")
 
         # Тип транспорта: RTU по COM или Modbus TCP
-        self.transport = str(line_conf.get("transport", "rtu")).lower()
+        self.transport = str(line_conf.get("transport", "serial")).lower()
 
         if self.transport == "tcp":
             # Параметры Modbus TCP
             self.host = line_conf["host"]
-            self.tcp_port = int(line_conf.get("port", 23))
+            self.tcp_port = int(line_conf.get("port", 502))
             self.timeout = float(line_conf.get("timeout", 1.0))
             self.port = f"{self.host}:{self.tcp_port}"  # только для логов
             # Для TCP эти поля по сути не используются, но оставим заглушки
@@ -808,6 +808,9 @@ class ModbusLine(threading.Thread):
             [pp for pp in params if int(getattr(pp, "words", 1) or 1) == 1],
             key=lambda x: (x.register_type, self._normalize_addr(x))
         )
+
+        if not items:
+            return []  # <<< FIX: все параметры multi-word, batch-blocks не делаем
 
         blocks: List[Tuple[str, int, int, List[ParamCfg]]] = []
 
