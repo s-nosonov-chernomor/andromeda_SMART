@@ -280,13 +280,13 @@ class ModbusLine(threading.Thread):
                     r = inst.write_coil(
                         address=addr,
                         value=1 if raw != 0 else 0,
-                        device_id=unit_id,
+                        slave=unit_id,
                     )
                 elif p.register_type == "holding":
                     r = inst.write_register(
                         address=addr,
                         value=raw,
-                        device_id=unit_id,
+                        slave=unit_id,
                     )
                 else:
                     raise RuntimeError(f"write unsupported for type={p.register_type}")
@@ -652,7 +652,7 @@ class ModbusLine(threading.Thread):
                     resp = inst.read_coils(
                         address=addr,
                         count=1,
-                        device_id=unit_id,
+                        slave=unit_id,
                     )
                     if resp.isError():
                         raise ModbusException(resp)
@@ -662,7 +662,7 @@ class ModbusLine(threading.Thread):
                     resp = inst.read_discrete_inputs(
                         address=addr,
                         count=1,
-                        device_id=unit_id,
+                        slave=unit_id,
                     )
                     if resp.isError():
                         raise ModbusException(resp)
@@ -674,13 +674,13 @@ class ModbusLine(threading.Thread):
                         resp = inst.read_holding_registers(
                             address=addr,
                             count=words,
-                            device_id=unit_id,
+                            slave=unit_id,
                         )
                     else:
                         resp = inst.read_input_registers(
                             address=addr,
                             count=words,
-                            device_id=unit_id,
+                            slave=unit_id,
                         )
                     if resp.isError():
                         raise ModbusException(resp)
