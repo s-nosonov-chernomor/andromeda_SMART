@@ -7,8 +7,9 @@ ALLOWED_PARAM_MODES    = {"r", "rw"}
 ALLOWED_PUBLISH_MODES  = {"on_change", "interval", "on_change_and_interval"}
 
 # multi-register / analog helpers
-ALLOWED_DATA_TYPES   = {"u16", "s16", "u32", "s32", "f32"}
-ALLOWED_WORD_ORDERS  = {"AB", "BA"}  # порядок 16-битных слов для 32-битных типов
+ALLOWED_DATA_TYPES   = {"u16", "s16", "u32", "s32", "u64", "s64", "f32"}
+# порядок 16-битных слов: для 32-бит (AB/BA), для 64-бит добавили (ABCD и варианты)
+ALLOWED_WORD_ORDERS  = {"AB", "BA", "ABCD", "DCBA", "BADC", "CDAB"}
 
 def _as_int(v, name, min_: Optional[int] = None, max_: Optional[int] = None) -> int:
     try:
@@ -270,20 +271,37 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
                 dtype = str(p.get("data_type", "u16") or "u16").strip()
                 if dtype not in ALLOWED_DATA_TYPES:
                     raise ValueError(f"{name}/{unit_id}/{pname}: data_type должен быть {ALLOWED_DATA_TYPES}")
+
                 worder = str(p.get("word_order", "AB") or "AB").strip()
+
                 if words == 1:
                     # для 16-битных значений порядок слов не влияет; но если задан — ограничим
-                    if worder not in ALLOWED_WORD_ORDERS:
-                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order должен быть {ALLOWED_WORD_ORDERS}")
-                else:
-                    # сейчас поддерживаем только 2-словные типы (32 бита)
-                    if words != 2:
-                        raise ValueError(f"{name}/{unit_id}/{pname}: words={words} не поддерживается (ожидалось 1 или 2)")
-                    if worder not in ALLOWED_WORD_ORDERS:
-                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order должен быть {ALLOWED_WORD_ORDERS}")
-                    if dtype in {"u16", "s16"}:
-                        raise ValueError(f"{name}/{unit_id}/{pname}: data_type={dtype} конфликтует с words=2")
+                    if worder not in {"AB", "BA"}:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order для words=1 должен быть AB/BA")
+                    if dtype not in {"u16", "s16"}:
+                        raise ValueError(
+                            f"{name}/{unit_id}/{pname}: data_type={dtype} конфликтует с words=1 (ожидалось u16/s16)")
+
+                elif words == 2:
+                    # 32-битные
+                    if worder not in {"AB", "BA"}:
+                        raise ValueError(f"{name}/{unit_id}/{pname}: word_order для words=2 должен быть AB/BA")
+                    if dtype in {"u16", "s16", "u64", "s64"}:
+                        raise ValueError(
+                            f"{name}/{unit_id}/{pname}: data_type={dtype} конфликтует с words=2 (ожидалось u32/s32/f32)")
                     # для u32/s32/f32 words=2 — ок
+
+                elif words == 4:
+                    # 64-битные
+                    if worder not in {"ABCD", "DCBA", "BADC", "CDAB"}:
+                        raise ValueError(
+                            f"{name}/{unit_id}/{pname}: word_order для words=4 должен быть ABCD/DCBA/BADC/CDAB")
+                    if dtype not in {"u64", "s64"}:
+                        raise ValueError(
+                            f"{name}/{unit_id}/{pname}: data_type={dtype} конфликтует с words=4 (ожидалось u64/s64)")
+
+                else:
+                    raise ValueError(f"{name}/{unit_id}/{pname}: words={words} не поддерживается (ожидалось 1/2/4)")
 
                 # для coil/discrete разрешим только words=1
                 if rt in {"coil", "discrete"} and words != 1:

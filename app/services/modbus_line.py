@@ -56,8 +56,8 @@ class ParamCfg:
     step: Optional[float] = None
     hysteresis: Optional[float] = None
     words: int = 1
-    data_type: str = "u16"         # u16|s16|u32|s32|f32
-    word_order: str = "AB"         # AB|BA (BA = word swap)
+    data_type: str = "u16"         # u16|s16|u32|s32|u64|s64|f32|f64
+    word_order: str = "AB"         # AB|BA|ABCD|DCBA|BADC|CDAB ...
 
 @dataclass
 class NodeCfg:
@@ -459,35 +459,68 @@ class ModbusLine(threading.Thread):
         return handler
 
     # ───────────────────────── порт/инструмент ────────────────────────────────
-    def _decode_words(self, regs: List[int], data_type: str, word_order: str) -> float:
+
+    def _decode_words(self, regs: List[int], data_type: str, word_order: str):
         # нормализуем 16-бит
         regs = [int(x) & 0xFFFF for x in regs]
-        order = (word_order or "AB").upper()
-        if data_type in ("u16", "s16"):
-            v = regs[0]
-            if data_type == "s16" and v & 0x8000:
-                v = v - 0x10000
-            return float(v)
+        dt = (data_type or "u16").lower()
+        order = (word_order or ("ABCD" if dt in ("u64", "s64", "f64") else "AB")).upper()
 
-        if data_type in ("u32", "s32", "f32"):
+        def reorder(words: List[int], order_str: str) -> List[int]:
+            # order_str типа "AB", "BA", "ABCD", "DCBA", "BADC", "CDAB"
+            letters = list(order_str)
+            n = len(words)
+            if len(letters) != n:
+                # если кто-то оставил AB для 4 слов — считаем это ABCD
+                if n == 4 and order_str in ("AB", "BA"):
+                    letters = list("ABCD" if order_str == "AB" else "DCBA")
+                else:
+                    letters = list("ABCD")[:n]
+
+            idx = {ch: i for i, ch in enumerate("ABCD"[:n])}
+            try:
+                return [words[idx[ch]] for ch in letters]
+            except Exception:
+                return words  # fallback
+
+        if dt in ("u16", "s16"):
+            v = regs[0]
+            if dt == "s16" and v & 0x8000:
+                v -= 0x10000
+            return int(v)
+
+        if dt in ("u32", "s32", "f32"):
             if len(regs) < 2:
                 raise ValueError("need 2 words for 32-bit value")
-            w0, w1 = (regs[0], regs[1])
-            if order == "BA":
-                w0, w1 = w1, w0
+            w = reorder(regs[:2], order if len(order) == 2 else "AB")
+            w0, w1 = w[0], w[1]
 
-            if data_type == "f32":
-                # регистры — два big-endian 16-битовых слова
+            if dt == "f32":
                 b = struct.pack(">HH", w0, w1)
                 return float(struct.unpack(">f", b)[0])
 
             u32 = (w0 << 16) | w1
-            if data_type == "s32" and (u32 & 0x80000000):
-                u32 = u32 - 0x100000000
-            return float(u32)
+            if dt == "s32" and (u32 & 0x80000000):
+                u32 -= 0x100000000
+            return int(u32)
 
-        # по умолчанию — u16
-        return float(regs[0])
+        if dt in ("u64", "s64", "f64"):
+            if len(regs) < 4:
+                raise ValueError("need 4 words for 64-bit value")
+            w = reorder(regs[:4], order if len(order) == 4 else "ABCD")
+            w0, w1, w2, w3 = w
+
+            if dt == "f64":
+                b = struct.pack(">HHHH", w0, w1, w2, w3)
+                return float(struct.unpack(">d", b)[0])
+
+            u64 = (w0 << 48) | (w1 << 32) | (w2 << 16) | w3
+            if dt == "s64" and (u64 & 0x8000000000000000):
+                u64 -= 0x10000000000000000
+            return int(u64)
+
+        # default
+        return int(regs[0])
 
     def _band_make(self, v: float, step: float, hyst: float) -> Tuple[float, float]:
         if step <= 0:
@@ -696,7 +729,17 @@ class ModbusLine(threading.Thread):
                 else:
                     return None, 10, "CONFIG_ERROR"
 
-                val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
+                raw_v = raw
+                scale = _safe_scale(p.scale)
+
+                # сохраняем int без потери точности, если scale=1 и тип целочисленный
+                is_int_type = str(p.data_type or "").lower() in ("u16", "s16", "u32", "s32", "u64", "s64")
+                if is_int_type and isinstance(raw_v, (int,)) and float(scale) == 1.0:
+                    val = raw_v
+                else:
+                    val = float(raw_v) * float(scale)
+                    val = _round_ndp(val, self.precision_decimals)
+
                 if self.debug.get("log_reads"):
                     self.log.debug(f"TCP read ok {p.register_type}[{addr}] raw={raw} -> {val}")
                 return val, 0, "OK"
@@ -724,7 +767,17 @@ class ModbusLine(threading.Thread):
             else:
                 return None, 10, "CONFIG_ERROR"
 
-            val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
+            raw_v = raw
+            scale = _safe_scale(p.scale)
+
+            # сохраняем int без потери точности, если scale=1 и тип целочисленный
+            is_int_type = str(p.data_type or "").lower() in ("u16", "s16", "u32", "s32", "u64", "s64")
+            if is_int_type and isinstance(raw_v, (int,)) and float(scale) == 1.0:
+                val = raw_v
+            else:
+                val = float(raw_v) * float(scale)
+                val = _round_ndp(val, self.precision_decimals)
+
             if self.debug.get("log_reads"):
                 self.log.debug(f"read ok {p.register_type}[{addr}] raw={raw} -> {val}")
             return val, 0, "OK"
@@ -1007,7 +1060,22 @@ class ModbusLine(threading.Thread):
                             # успех блока
                             for i, p in enumerate(group_params):
                                 raw = block_vals[i]
-                                val = _round_ndp(float(raw) * _safe_scale(p.scale), self.precision_decimals)
+
+                                # привести типы так же, как в _read_single()
+                                dt = (p.data_type or "u16").lower()
+
+                                if rtype in ("coil", "discrete"):
+                                    raw_v = 1 if bool(raw) else 0
+                                elif dt == "s16":
+                                    raw_v = int(raw) & 0xFFFF
+                                    if raw_v & 0x8000:
+                                        raw_v -= 0x10000
+                                else:
+                                    raw_v = int(raw) & 0xFFFF  # u16 по умолчанию
+
+                                val = float(raw_v) * _safe_scale(p.scale)
+                                val = _round_ndp(val, self.precision_decimals)
+
                                 key = self._make_key(nd.unit_id, p.name)
                                 now = _now_ms()
                                 self._last_ok_ts[key] = now

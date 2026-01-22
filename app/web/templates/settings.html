@@ -311,19 +311,19 @@
       </div>
       <div>
         <label class="label">Адрес</label>
-        <input id="m_addr" type="number" step="1" class="input" title="PDU-адрес (если включена нормализация — можно вводить 30001/40001)">
+        <input id="m_addr" type="number" step="1" class="input" title="Адрес регистра. Если включена нормализация — можно вводить 1-based и '3xxxx/4xxxx' (например 30001/40001) — будет приведено к PDU-адресу.">
       </div>
       <div>
         <label class="label">Words</label>
-        <input id="m_words" type="number" step="1" min="1" class="input" value="1" title="Количество 16-бит слов (1 для u16/s16; 2 для u32/s32/f32)">
+        <input id="m_words" type="number" step="1" min="1" class="input" value="1" title="Количество 16-битных слов: 1 (16-bit), 2 (32-bit), 4 (64-bit). Обычно ставится автоматически по Data type.">
       </div>
       <div>
         <label class="label">Data type</label>
-        <select id="m_dtype" class="select" title="u16, s16, u32, s32, f32"></select>
+        <select id="m_dtype" class="select" title="Тип данных: u16/s16/u32/s32/u64/s64/f32 (влияет на Words и Word order)"></select>
       </div>
       <div>
         <label class="label">Word order</label>
-        <select id="m_worder" class="select"></select>
+        <select id="m_worder" class="select" title="Порядок 16-битных слов: AB/BA для 32-бит; ABCD/DCBA/BADC/CDAB для 64-бит"></select>
       </div>
 
       <div>
@@ -332,7 +332,7 @@
       </div>
       <div>
         <label class="label">Mode</label>
-        <select id="m_mode" class="select" title="Порядок слов для многословных регистров (AB или BA)"></select>
+        <select id="m_mode" class="select" title="Режим параметра: r (только чтение) / rw (чтение-запись)"></select>
       </div>
       <div>
         <label class="label">Publish mode</label>
@@ -341,7 +341,7 @@
 
       <div>
         <label class="label">publish_interval_s</label>
-        <input id="m_pint" type="number" step="1" class="input" value="0" title="Интервал публикации (мс), если выбран режим по интервалу">
+        <input id="m_pint" type="number" step="1" class="input" value="0" title="Интервал публикации (секунды), если выбран interval или on_change_and_interval">
       </div>
       <div class="grid" style="grid-column: span 2;">
         <label class="label">Topic (опц.)</label>
@@ -846,20 +846,54 @@
     qs('#m_topic').value='';
 
   }
+     // узлы по текущей линии
+  function applyDtypeDefaults(){
+    const dt = (qs('#m_dtype').value || 'u16').toLowerCase();
+
+    // слова по dtype
+    if(dt === 'u16' || dt === 's16'){
+      qs('#m_words').value = 1;
+      // для 1 слова word_order не важен, но пусть будет AB
+      qs('#m_worder').value = 'AB';
+    } else if(dt === 'u32' || dt === 's32' || dt === 'f32'){
+      qs('#m_words').value = 2;
+      // для 2 слов: AB/BA
+      if(!['AB','BA'].includes(qs('#m_worder').value)) qs('#m_worder').value = 'AB';
+    } else if(dt === 'u64' || dt === 's64'){
+      qs('#m_words').value = 4;
+      // big-endian по словам: ABCD (старшее→младшее)
+      if(!['ABCD','DCBA','BADC','CDAB'].includes(qs('#m_worder').value)) qs('#m_worder').value = 'ABCD';
+    }
+
+    // Можно (по желанию) запретить руками менять words, чтобы не ломали соответствие:
+    // qs('#m_words').disabled = (dt !== 'custom'); // если введёшь custom
+  }
+
 
   function fillEnumsInModal(){
     qs('#m_rtype').innerHTML = ENUMS.register_types.map(x=> `<option>${x}</option>`).join('');
     qs('#m_mode').innerHTML  = ENUMS.param_modes.map(x=> `<option>${x}</option>`).join('');
     qs('#m_pmode').innerHTML = ENUMS.publish_modes.map(x=> `<option>${x}</option>`).join('');
 
-    qs('#m_dtype').innerHTML  = (ENUMS.data_types||["u16","s16","u32","s32","f32"]).map(x=> `<option>${x}</option>`).join('');
-    qs('#m_worder').innerHTML = (ENUMS.word_orders||["AB","BA"]).map(x=> `<option>${x}</option>`).join('');
+    qs('#m_dtype').innerHTML  = (ENUMS.data_types||["u16","s16","u32","s32","u64","s64","f32"]).map(x=> `<option>${x}</option>`).join('');
+    qs('#m_worder').innerHTML = (ENUMS.word_orders||["AB","BA","ABCD","DCBA","BADC","CDAB"]).map(x=> `<option>${x}</option>`).join('');
 
     // линии
     qs('#m_line2').innerHTML = LINES.map(x=> `<option>${escHtml(x.name)}</option>`).join('');
+
+    // handlers (после заполнения списков!)
+    qs('#m_dtype').onchange  = applyDtypeDefaults;
+    qs('#m_worder').onchange = applyDtypeDefaults; // опционально
+    qs('#m_rtype').onchange  = applyDtypeDefaults; // полезно (coil/discrete → words=1)
+
     // узлы по текущей линии
     fillNodesBySelectedLine();
+
+    // первичная установка defaults
+    applyDtypeDefaults();
   }
+
+
 
   function fillNodesBySelectedLine(){
     const lineName = qs('#m_line2').value;
@@ -876,6 +910,7 @@
     EDIT_CTX = null;
     qs('#modal-title').textContent = 'Добавить параметр';
     fillEnumsInModal();
+    applyDtypeDefaults();
     qs('#m_scale').value = '1';
     qs('#m_pint').value = '0';
     openModal('add');
