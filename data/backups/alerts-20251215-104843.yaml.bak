@@ -1,0 +1,103 @@
+flows:
+- id: eeb9d856-39b2-45e6-8540-687a9cbf72e0
+  name: Комплекс РАДУЖНЫЙ
+  type: telegram
+  enabled: false
+  options:
+    telegram:
+      bot_token: 7748412244:AAGFDFbxZxfTwnecO0zJ7FRu6IcB576EuBc
+      chat_id: '580097120'
+    ronet: {}
+  params:
+  - key: line1|44|второй параметр
+    alias: мощность чайника
+    path: ЖК Крылья / Дом 1
+    nominal: 1
+    tolerance: null
+    ok_text: в норме
+    alarm_text: авария
+  events:
+    group_window_s: 1
+    selected: []
+    exceptions: []
+  intervals:
+    group_window_s: 10
+    selected: []
+    exceptions: []
+- id: f48703ec-08b4-4dc4-9a57-1f6ce4bede64
+  name: Поток логов автоматики
+  type: automation_logs
+  enabled: true
+  options:
+    telegram:
+      bot_token: 7748412244:AAGFDFbxZxfTwnecO0zJ7FRu6IcB576EuBc
+      chat_id: '580097120'
+  params:
+  - key: реле3
+    alias: релешка3
+    path: ЖК Крылья / Дом 1
+    nominal: null
+    tolerance: null
+    ok_text: в норме
+    alarm_text: авария
+  events:
+    group_window_s: 10
+    selected: []
+    exceptions: []
+  intervals:
+    group_window_s: 60
+    selected: []
+    exceptions: []
+
+- id: ronet-1
+  name: "Комплекс РАДУЖНЫЙ → RoNet"
+  type: ronet
+  enabled: true
+
+  options:
+    ronet:
+      endpoint_url: "https://some-ro-net-endpoint/api/data"   # уже есть
+      # ОБЩИЕ НАСТРОЙКИ UM SMART / USPD
+      um_name: "UM SMART"
+      um_serial: "200001159701"
+      um_fw: "33965"               # опционально
+      measure: "aMonth"            # measure.measures[0].measure
+      # device-* общие для всех параметров потока
+      device_id: 16
+      meter: 16
+      device_serial: "48079623"
+      device_model: "Mercury 234 X"
+      device_type: 42              # как в примере
+      # формат времени (на будущее, можно оставить default)
+      tz_offset_minutes: 180       # +03:00
+
+  # параметры, за которыми следим (источник из основного YAML, как у телеги)
+  params:
+    - key: "line1|44|A+0"         # источник значения из опроса
+      alias: "Энергия активная A+0"
+      path: "ЖК Радужный / Дом 1 / ВРУ-1"
+      tag: "A+0"                   # то, что пойдёт в tags[].tag
+
+    - key: "line1|44|A-0"
+      alias: "Энергия активная A-0"
+      path: "ЖК Радужный / Дом 1 / ВРУ-1"
+      tag: "A-0"
+
+    - key: "line1|44|R+0"
+      alias: "Энергия реактивная R+0"
+      path: "ЖК Радужный / Дом 1 / ВРУ-1"
+      tag: "R+0"
+
+  # Логика выборки такая же, как у Telegram-потока
+  events:
+    group_window_s: 10
+    selected:
+      - "line1|44|A+0"
+      - "line1|44|A-0"
+      - "line1|44|R+0"
+    exceptions: []   # можно использовать, если какие-то значения игнорируем
+
+  intervals:
+    group_window_s: 60
+    selected: []
+    exceptions: []

@@ -11,209 +11,224 @@
 {% block content %}
 
 <!-- ───────────────────────── Общие ───────────────────────── -->
-<div class="card">
-  <h3>Общие</h3>
-  <div class="grid cols-2" style="margin-top:10px">
-    <!-- MQTT -->
-    <div class="card" style="padding:12px">
-      <h3>MQTT</h3>
-      <div class="grid">
-        <label class="label">Host</label>
-        <input class="input" id="mqtt_host" placeholder="127.0.0.1" title="Адрес MQTT брокера (IP или DNS)">
+<details class="card collapsible" id="sec-general" open>
+  <summary class="collapsible-summary">
+    <div class="collapsible-title">
+      <h3 style="margin:0">Общие</h3>
+      <span class="muted">MQTT / polling / DB / backups / сервис</span>
+    </div>
+    <div class="collapsible-actions">
+      <button class="btn btn-primary" id="btn-save-general" type="button">Сохранить общие</button>
+      <span class="muted">MQTT/DB вступят в силу после перезапуска сервиса</span>
+    </div>
+  </summary>
 
-        <label class="label">Port</label>
-        <input class="input" id="mqtt_port" type="number" min="1" step="1" placeholder="1883" title="Порт MQTT брокера">
+  <div class="collapsible-body">
 
-        <label class="label">Base topic</label>
-        <input class="input" id="mqtt_base" placeholder="/devices" title="Префикс для публикаций и команд">
+    <div class="grid cols-2" style="margin-top:10px">
+      <!-- MQTT -->
+      <div class="card" style="padding:12px">
+        <h3>MQTT</h3>
+        <div class="grid">
+          <label class="label">Host</label>
+          <input class="input" id="mqtt_host" placeholder="127.0.0.1" title="Адрес MQTT брокера (IP или DNS)">
 
+          <label class="label">Port</label>
+          <input class="input" id="mqtt_port" type="number" min="1" step="1" placeholder="1883" title="Порт MQTT брокера">
+
+          <label class="label">Base topic</label>
+          <input class="input" id="mqtt_base" placeholder="/devices" title="Префикс для публикаций и команд">
+
+          <div class="grid cols-2">
+            <div>
+              <label class="label" title="QoS 0/1/2">QoS</label>
+              <input class="input" id="mqtt_qos" type="number" min="0" max="2" step="1" placeholder="0" title="Уровень надежности доставки">
+            </div>
+            <div>
+              <label class="label" title="Сохранять последнее значение на брокере">Retain</label>
+              <div><input id="mqtt_retain" type="checkbox"> <span class="muted">включить retain</span></div>
+            </div>
+          </div>
+
+          <label class="label">Client ID (опц.)</label>
+          <input class="input" id="mqtt_client_id" placeholder="uspd-modbus-gw" title="Идентификатор клиента MQTT (необязательно)">
+        </div>
+      </div>
+
+      <!-- Polling -->
+      <div class="card" style="padding:12px">
+        <h3>Опрос (polling)</h3>
+        <div class="grid cols-3">
+          <div title="Период основного цикла опроса">
+            <label class="label">interval_ms</label>
+            <input class="input" id="poll_interval" type="number" min="1" step="1">
+          </div>
+          <div title="Случайная добавка к интервалу для сглаживания пиков">
+            <label class="label">jitter_ms</label>
+            <input class="input" id="poll_jitter" type="number" min="0" step="1">
+          </div>
+          <div title="Пауза бэкоффа для проблемного узла">
+            <label class="label">backoff_ms</label>
+            <input class="input" id="poll_backoff" type="number" min="0" step="1">
+          </div>
+          <div title="Сколько подряд ошибок до временного замедления узла">
+            <label class="label">max_errors_before_backoff</label>
+            <input class="input" id="poll_maxerr" type="number" min="0" step="1">
+          </div>
+          <div title="Как часто пытаться переоткрыть порт, если он упал/занят">
+            <label class="label">port_retry_backoff_s</label>
+            <input class="input" id="poll_port_retry" type="number" min="1" step="1">
+          </div>
+          <div title="Пакетное чтение последовательных регистров">
+            <label class="label">batch_read.enabled</label>
+            <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
+          </div>
+          <div title="Максимум битов (coil/discrete) в одном запросе">
+            <label class="label">batch_read.max_bits</label>
+            <input class="input" id="batch_max_bits" type="number" min="1" step="1">
+          </div>
+          <div title="Максимум регистров (holding/input) в одном запросе">
+            <label class="label">batch_read.max_registers</label>
+            <input class="input" id="batch_max_regs" type="number" min="1" step="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="card" style="padding:12px">
+        <h3>История (БД → ротация)</h3>
+        <div class="grid cols-3">
+          <div title="Ограничение количества строк таблицы">
+            <label class="label">max_rows</label>
+            <input class="input" id="hist_rows" type="number" min="0" step="1">
+          </div>
+          <div title="Удалять записи старше N дней (0 = не удалять)">
+            <label class="label">ttl_days</label>
+            <input class="input" id="hist_ttl" type="number" min="0" step="1">
+          </div>
+          <div title="Как часто выполнять очистку">
+            <label class="label">cleanup_every</label>
+            <input class="input" id="hist_cleanup" type="number" min="1" step="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- DB -->
+      <div class="card" style="padding:12px">
+        <h3>DB</h3>
+        <div class="grid">
+          <label class="label" title="sqlite:///./data/data.db для Windows; sqlite:////opt/... для Linux">db.url</label>
+          <input class="input" id="db_url" placeholder="sqlite:///./data/data.db">
+        </div>
+      </div>
+
+      <!-- Serial -->
+      <div class="card" style="padding:12px">
+        <h3>Serial</h3>
+        <div class="grid">
+          <label class="label" title="Если драйвер/трансивер возвращает отправленные байты обратно в RX">Эхо на порту (RS-485 loopback)</label>
+          <div><input id="serial_echo" type="checkbox"> <span class="muted">включить режим «эхо»</span></div>
+        </div>
+      </div>
+
+      <!-- Addressing -->
+      <div class="card" style="padding:12px">
+        <h3>Адресация</h3>
+        <div class="grid">
+          <label class="label" title="Если включено — принимаем 1-based/30001/40001 и приводим к PDU-адресам. Если выключено — адрес «как есть».">
+            Нормализовать адреса
+          </label>
+          <div>
+            <input id="addr_norm" type="checkbox">
+            <span class="muted">1-based / 30001 / 40001 → PDU</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backups -->
+      <div class="card" style="padding:12px">
+        <h3>Backups</h3>
         <div class="grid cols-2">
           <div>
-            <label class="label" title="QoS 0/1/2">QoS</label>
-            <input class="input" id="mqtt_qos" type="number" min="0" max="2" step="1" placeholder="0" title="Уровень надежности доставки">
+            <label class="label">backups.dir</label>
+            <input class="input" id="bk_dir" placeholder="./data/backups" title="Каталог для резервных копий YAML и агента">
           </div>
           <div>
-            <label class="label" title="Сохранять последнее значение на брокере">Retain</label>
-            <div><input id="mqtt_retain" type="checkbox"> <span class="muted">включить retain</span></div>
+            <label class="label">backups.keep</label>
+            <input class="input" id="bk_keep" type="number" min="0" step="1" title="Сколько бэкапов хранить (0 — не ограничивать)">
           </div>
         </div>
-
-        <label class="label">Client ID (опц.)</label>
-        <input class="input" id="mqtt_client_id" placeholder="uspd-modbus-gw" title="Идентификатор клиента MQTT (необязательно)">
       </div>
-    </div>
 
-    <!-- Polling -->
-    <div class="card" style="padding:12px">
-      <h3>Опрос (polling)</h3>
-      <div class="grid cols-3">
-        <div title="Период основного цикла опроса">
-          <label class="label">interval_ms</label>
-          <input class="input" id="poll_interval" type="number" min="1" step="1">
-        </div>
-        <div title="Случайная добавка к интервалу для сглаживания пиков">
-          <label class="label">jitter_ms</label>
-          <input class="input" id="poll_jitter" type="number" min="0" step="1">
-        </div>
-        <div title="Пауза бэкоффа для проблемного узла">
-          <label class="label">backoff_ms</label>
-          <input class="input" id="poll_backoff" type="number" min="0" step="1">
-        </div>
-        <div title="Сколько подряд ошибок до временного замедления узла">
-          <label class="label">max_errors_before_backoff</label>
-          <input class="input" id="poll_maxerr" type="number" min="0" step="1">
-        </div>
-        <div title="Как часто пытаться переоткрыть порт, если он упал/занят">
-          <label class="label">port_retry_backoff_s</label>
-          <input class="input" id="poll_port_retry" type="number" min="1" step="1">
-        </div>
-        <div title="Пакетное чтение последовательных регистров">
-          <label class="label">batch_read.enabled</label>
-          <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
-        </div>
-        <div title="Максимум битов (coil/discrete) в одном запросе">
-          <label class="label">batch_read.max_bits</label>
-          <input class="input" id="batch_max_bits" type="number" min="1" step="1">
-        </div>
-        <div title="Максимум регистров (holding/input) в одном запросе">
-          <label class="label">batch_read.max_registers</label>
-          <input class="input" id="batch_max_regs" type="number" min="1" step="1">
+      <!-- Current -->
+      <div class="card" style="padding:12px">
+        <h3>Current</h3>
+        <div class="grid">
+          <label class="label" title="Как часто обновлять last_ok_ts без публикации (сек)">touch_read_every_s</label>
+          <input class="input" id="cur_touch" type="number" min="0" step="1">
         </div>
       </div>
-    </div>
 
-    <!-- History -->
-    <div class="card" style="padding:12px">
-      <h3>История (БД → ротация)</h3>
-      <div class="grid cols-3">
-        <div title="Ограничение количества строк таблицы">
-          <label class="label">max_rows</label>
-          <input class="input" id="hist_rows" type="number" min="0" step="1">
+      <!-- Service / Andromeda -->
+      <div class="card" style="padding:12px">
+        <h3>Сервис</h3>
+        <div class="grid cols-2">
+          <div>
+            <label class="label">systemd unit</label>
+            <input class="input" id="svc_unit" placeholder="agent.service" title="Имя сервиса в systemd">>
+          </div>
+          <div>
+            <label class="label">restart_cmd</label>
+            <input class="input" id="svc_restart" placeholder="" title="Пользовательская команда рестарта (если не systemd)">
+          </div>
         </div>
-        <div title="Удалять записи старше N дней (0 = не удалять)">
-          <label class="label">ttl_days</label>
-          <input class="input" id="hist_ttl" type="number" min="0" step="1">
-        </div>
-        <div title="Как часто выполнять очистку">
-          <label class="label">cleanup_every</label>
-          <input class="input" id="hist_cleanup" type="number" min="1" step="1">
-        </div>
-      </div>
-    </div>
-
-    <!-- DB -->
-    <div class="card" style="padding:12px">
-      <h3>DB</h3>
-      <div class="grid">
-        <label class="label" title="sqlite:///./data/data.db для Windows; sqlite:////opt/... для Linux">db.url</label>
-        <input class="input" id="db_url" placeholder="sqlite:///./data/data.db">
-      </div>
-    </div>
-
-    <!-- Serial -->
-    <div class="card" style="padding:12px">
-      <h3>Serial</h3>
-      <div class="grid">
-        <label class="label" title="Если драйвер/трансивер возвращает отправленные байты обратно в RX">Эхо на порту (RS-485 loopback)</label>
-        <div><input id="serial_echo" type="checkbox"> <span class="muted">включить режим «эхо»</span></div>
-      </div>
-    </div>
-
-    <!-- Addressing -->
-    <div class="card" style="padding:12px">
-      <h3>Адресация</h3>
-      <div class="grid">
-        <label class="label" title="Если включено — принимаем 1-based/30001/40001 и приводим к PDU-адресам. Если выключено — адрес «как есть».">
-          Нормализовать адреса
-        </label>
-        <div>
-          <input id="addr_norm" type="checkbox">
-          <span class="muted">1-based / 30001 / 40001 → PDU</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Backups -->
-    <div class="card" style="padding:12px">
-      <h3>Backups</h3>
-      <div class="grid cols-2">
-        <div>
-          <label class="label">backups.dir</label>
-          <input class="input" id="bk_dir" placeholder="./data/backups" title="Каталог для резервных копий YAML и агента">
-        </div>
-        <div>
-          <label class="label">backups.keep</label>
-          <input class="input" id="bk_keep" type="number" min="0" step="1" title="Сколько бэкапов хранить (0 — не ограничивать)">
-        </div>
-      </div>
-    </div>
-
-    <!-- Current -->
-    <div class="card" style="padding:12px">
-      <h3>Current</h3>
-      <div class="grid">
-        <label class="label" title="Как часто обновлять last_ok_ts без публикации (сек)">touch_read_every_s</label>
-        <input class="input" id="cur_touch" type="number" min="0" step="1">
-      </div>
-    </div>
-
-    <!-- Service / Andromeda -->
-    <div class="card" style="padding:12px">
-      <h3>Сервис</h3>
-      <div class="grid cols-2">
-        <div>
-          <label class="label">systemd unit</label>
-          <input class="input" id="svc_unit" placeholder="agent.service" title="Имя сервиса в systemd">>
-        </div>
-        <div>
+        <h3 style="margin-top:10px">Andromeda</h3>
+        <div class="grid">
           <label class="label">restart_cmd</label>
-          <input class="input" id="svc_restart" placeholder="" title="Пользовательская команда рестарта (если не systemd)">
+          <input class="input" id="andr_restart" placeholder="/usr/local/bin/restart-andromeda.sh" title="Команда перезапуска агента Андромеды">
         </div>
       </div>
-      <h3 style="margin-top:10px">Andromeda</h3>
-      <div class="grid">
-        <label class="label">restart_cmd</label>
-        <input class="input" id="andr_restart" placeholder="/usr/local/bin/restart-andromeda.sh" title="Команда перезапуска агента Андромеды">
-      </div>
-    </div>
 
-
-
-    <!-- Debug -->
-    <div class="card" style="padding:12px">
-      <h3>DEBUG</h3>
-      <div class="grid cols-3">
-        <div title="Включить подробные логи">
-          <label class="label">enabled</label>
-          <div><input id="dbg_enabled" type="checkbox"> <span class="muted">подробные логи</span></div>
-        </div>
-        <div title="Логировать каждое успешное чтение">
-          <label class="label">log_reads</label>
-          <div><input id="dbg_reads" type="checkbox"> <span class="muted">логировать чтения</span></div>
-        </div>
-        <div title="Период печати кратких сводок (0=выкл)">
-          <label class="label">summary_every_s</label>
-          <input class="input" id="dbg_summary" type="number" min="0" step="1">
+      <!-- Debug -->
+      <div class="card" style="padding:12px">
+        <h3>DEBUG</h3>
+        <div class="grid cols-3">
+          <div title="Включить подробные логи">
+            <label class="label">enabled</label>
+            <div><input id="dbg_enabled" type="checkbox"> <span class="muted">подробные логи</span></div>
+          </div>
+          <div title="Логировать каждое успешное чтение">
+            <label class="label">log_reads</label>
+            <div><input id="dbg_reads" type="checkbox"> <span class="muted">логировать чтения</span></div>
+          </div>
+          <div title="Период печати кратких сводок (0=выкл)">
+            <label class="label">summary_every_s</label>
+            <input class="input" id="dbg_summary" type="number" min="0" step="1">
+          </div>
         </div>
       </div>
+
     </div>
   </div>
-
-  <div class="toolbar">
-    <button class="btn btn-primary" id="btn-save-general">Сохранить общие</button>
-    <span class="muted">Изменения MQTT/DB вступят в силу после перезапуска сервиса.</span>
-  </div>
-</div>
+</details>
 
 <!-- ───────────────────────── Линии/узлы ───────────────────────── -->
-<div class="card" style="margin-top:16px">
-  <div class="toolbar">
-    <h3 style="margin:0">Линии / узлы</h3>
-    <span style="flex:1"></span>
-    <button class="btn btn-primary" id="btn-add-line">Добавить линию</button>
+<details class="card collapsible" id="sec-lines">
+  <summary class="collapsible-summary">
+    <div class="collapsible-title">
+      <h3 style="margin:0">Линии / узлы</h3>
+      <span class="muted">порты, TCP/serial, Unit ID, Object</span>
+    </div>
+    <div class="collapsible-actions">
+      <button class="btn btn-primary" id="btn-add-line" type="button">Добавить линию</button>
+    </div>
+  </summary>
+
+  <div class="collapsible-body">
+    <div id="lines-wrap"></div>
   </div>
-  <div id="lines-wrap"></div>
-</div>
+</details>
+
 
 <!-- ───────────────────────── Регистры ───────────────────────── -->
 <div class="card" style="margin-top:16px">
@@ -328,7 +343,11 @@
 
       <div>
         <label class="label">Scale</label>
-        <input id="m_scale" type="number" step="0.001" class="input" value="1" title="Множитель для пересчёта значения">
+        <input id="m_scale" type="text" inputmode="decimal" class="input"
+       style="width:220px"
+       value="1" placeholder="например: 0,00000012325"
+       title="Множитель для пересчёта значения (можно вводить с запятой)">
+
       </div>
       <div>
         <label class="label">Mode</label>
@@ -350,11 +369,11 @@
 
       <div>
         <label class="label">Step (дискретность)</label>
-        <input id="m_step" type="number" step="0.0001" class="input" title="Шаг изменения для числовых полей (UI)">
+        <input id="m_step" type="text" inputmode="decimal" class="input" title="Шаг изменения для числовых полей (UI)">
       </div>
       <div>
         <label class="label">Hysteresis</label>
-        <input id="m_hyst" type="number" step="0.0001" class="input" title="Гистерезис публикации значения">
+        <input id="m_hyst" type="text" inputmode="decimal" class="input" title="Гистерезис публикации значения">
       </div>
 
       <div></div><div></div>
@@ -377,6 +396,16 @@
   const qsa = (s, r=document)=> [...r.querySelectorAll(s)];
   const toast = qs('#toast');
   const elLinesWrap = qs('#lines-wrap');
+
+  const fmtNumRU = (v) => (v==null ? '' : String(v).replace('.', ','));
+  const parseNumRU = (s, def=null) => {
+    if (s==null) return def;
+    const t = String(s).trim().replace(/\s/g,'').replace(',', '.');
+    if (t==='') return def;
+    const x = Number(t);
+    return Number.isFinite(x) ? x : def;
+  };
+
 
   function showToast(msg){ toast.textContent = msg; toast.style.display = 'block'; setTimeout(()=> toast.style.display = 'none', 2500); }
   const fmt = x => x==null? '' : String(x);
@@ -950,13 +979,13 @@
     qs('#m_words').value  = p.words ?? 1;
     qs('#m_dtype').value  = p.data_type || 'u16';
     qs('#m_worder').value = p.word_order || 'AB';
-    qs('#m_scale').value = p.scale ?? 1;
+    qs('#m_scale').value = fmtNumRU(p.scale ?? 1);
     qs('#m_mode').value  = p.mode;
     qs('#m_pmode').value = p.publish_mode || 'on_change';
     qs('#m_pint').value  = p.publish_interval_s ?? 0;
     qs('#m_topic').value = p.topic || '';
-    qs('#m_step').value = (p.step==null ? '' : p.step);
-    qs('#m_hyst').value = (p.hysteresis==null ? '' : p.hysteresis);
+    qs('#m_step').value  = (p.step==null ? '' : fmtNumRU(p.step));
+    qs('#m_hyst').value  = (p.hysteresis==null ? '' : fmtNumRU(p.hysteresis));
     openModal('edit');
   }
 
@@ -975,13 +1004,13 @@
       words: (+qs('#m_words').value || 1),
       data_type: qs('#m_dtype').value,
       word_order: qs('#m_worder').value,
-      scale: +qs('#m_scale').value || 1.0,
+      scale: parseNumRU(qs('#m_scale').value, 1.0),
       mode: qs('#m_mode').value,
       publish_mode: qs('#m_pmode').value,
       publish_interval_s: +qs('#m_pint').value || 0,
       topic: qs('#m_topic').value.trim() || null,
-      step: (qs('#m_step').value===''? null : +qs('#m_step').value),
-      hysteresis: (qs('#m_hyst').value===''? null : +qs('#m_hyst').value),
+      step: (qs('#m_step').value.trim()==='' ? null : parseNumRU(qs('#m_step').value, null)),
+      hysteresis: (qs('#m_hyst').value.trim()==='' ? null : parseNumRU(qs('#m_hyst').value, null)),
     };
 
     if(MODAL_MODE === 'add'){

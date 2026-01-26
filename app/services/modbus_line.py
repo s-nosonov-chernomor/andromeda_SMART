@@ -887,10 +887,13 @@ class ModbusLine(threading.Thread):
 
         # changed = (value is not None) and (last_val is None or value != last_val)
         if value is not None:
-            step = float(p.step) if p.step not in (None, "") else 0.0
-            hyst = float(p.hysteresis) if p.hysteresis not in (None, "") else 0.0
-            changed = self._analog_changed(key, float(value), step, hyst) if (step > 0 or hyst > 0) \
-                else ((last_val is None) or (value != last_val))
+            if p.register_type in ("coil", "discrete"):
+                changed = (value is not None) and (last_val is None or int(value) != int(last_val))
+            else:
+                step = float(p.step) if p.step not in (None, "") else 0.0
+                hyst = float(p.hysteresis) if p.hysteresis not in (None, "") else 0.0
+                changed = self._analog_changed(key, float(value), step, hyst) if (step > 0 or hyst > 0) \
+                    else ((last_val is None) or (value != last_val))
         else:
             changed = False
 

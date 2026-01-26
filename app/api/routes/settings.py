@@ -18,6 +18,79 @@ from app.core.validate_cfg import validate_cfg
 # ─────────────────────────────────────────────────────────────────────────────
 # helpers
 # ─────────────────────────────────────────────────────────────────────────────
+def _normalize_lines_for_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Приводит lines к аккуратному виду:
+      - порядок ключей фиксирован
+      - для tcp не сохраняем serial-поля
+      - для serial не сохраняем tcp-поля
+    """
+    lines = cfg.get("lines") or []
+    new_lines: List[Dict[str, Any]] = []
+
+    for ln in lines:
+        t = (ln.get("transport") or "serial").strip().lower()
+        nodes = ln.get("nodes") or []
+
+        if t == "tcp":
+            clean = {
+                "name": ln.get("name", ""),
+                "transport": "tcp",
+                "host": ln.get("host", ""),
+                "port": ln.get("port", 502),
+                "timeout": float(ln.get("timeout", 1.0)),
+                "port_retry_backoff_s": int(ln.get("port_retry_backoff_s", 5)),
+                "nodes": nodes,
+            }
+        else:
+            clean = {
+                "name": ln.get("name", ""),
+                "transport": t,  # serial/rtu
+                "device": ln.get("device", ""),
+                "baudrate": int(ln.get("baudrate", 9600)),
+                "timeout": float(ln.get("timeout", 0.1)),
+                "parity": (ln.get("parity", "N") or "N"),
+                "stopbits": int(ln.get("stopbits", 1)),
+                "port_retry_backoff_s": int(ln.get("port_retry_backoff_s", 5)),
+                "rs485_rts_toggle": bool(ln.get("rs485_rts_toggle", False)),
+                "nodes": nodes,
+            }
+
+        new_lines.append(clean)
+
+    cfg["lines"] = new_lines
+    return cfg
+
+
+def _to_str(v: Any) -> str:
+    return "" if v is None else str(v)
+
+def _parse_int(v: Any, default: Optional[int] = None) -> Optional[int]:
+    if v is None or v == "":
+        return default
+    try:
+        if isinstance(v, float):
+            return int(v)
+        return int(str(v).strip())
+    except Exception:
+        return default
+
+def _parse_float_ru(v: Any, default: Optional[float] = None) -> Optional[float]:
+    """
+    Понимает:
+      - float/int из openpyxl
+      - строки с точкой или запятой: "0,001"
+      - пустые -> default
+    """
+    if v is None or v == "":
+        return default
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        s = str(v).strip().replace(" ", "").replace(",", ".")
+        return float(s)
+    except Exception:
+        return default
 
 def _migrate_param_ms_to_s(p: Dict[str, Any]) -> Dict[str, Any]:
     p = dict(p or {})
@@ -250,6 +323,7 @@ def add_line(payload: Dict[str, Any]):
         "rs485_rts_toggle": False,
         "nodes": []
     })
+    cfg = _normalize_lines_for_yaml(cfg)
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}
 
@@ -284,7 +358,7 @@ def update_line(body: Dict[str, Any]):
         ):
             line[k] = v
 
-
+    cfg = _normalize_lines_for_yaml(cfg)
     backup = _write_cfg(cfg)
     return {"ok": True, "backup": backup}
 
@@ -519,38 +593,125 @@ def export_params_xlsx():
     ws.title = "params"
 
     headers = [
-        "Линия","Unit","Параметр","Тип","Адрес",
-        "Words","DataType","WordOrder",
-        "Scale","Mode","Publish","Interval, s","Topic",
-        "Step","Hysteresis",
+        # line key + line settings
+        "Линия",
+        "Transport",
+        "Device",
+        "Host",
+        "Port",
+        "Baudrate",
+        "Parity",
+        "Stopbits",
+        "Timeout, s",
+        "port_retry_backoff_s",
+        "rs485_rts_toggle",
+
+        # node key + node settings
+        "Unit",
+        "Object",
+        "Num_object",
+
+        # param
+        "Параметр",
+        "Тип",
+        "Адрес",
+        "Words",
+        "DataType",
+        "WordOrder",
+        "Scale",
+        "Mode",
+        "Publish",
+        "Interval, s",
+        "Topic",
+        "Step",
+        "Hysteresis",
     ]
     ws.append(headers)
 
+    # (не обязательно) ширины колонок чуть удобнее
+    widths = {
+        "A": 14, "B": 10, "C": 16, "D": 16, "E": 8,
+        "F": 10, "G": 8, "H": 9, "I": 10, "J": 16, "K": 14,
+        "L": 8, "M": 20, "N": 12,
+        "O": 18, "P": 10, "Q": 10, "R": 7, "S": 10, "T": 10,
+        "U": 16, "V": 8, "W": 14, "X": 12, "Y": 20, "Z": 10, "AA": 12
+    }
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+
     for ln in cfg.get("lines", []) or []:
-        line_name = ln.get("name","")
+        line_name = ln.get("name", "")
+        transport = (ln.get("transport") or "serial").strip().lower()
+
+        prb = ln.get("port_retry_backoff_s", 5)
+
+        # defaults as empty (so we never "invent" data)
+        device = ""
+        baudrate = ""
+        parity = ""
+        stopbits = ""
+        host = ""
+        port = ""
+        timeout = ""
+
+        rts = ""  # rs485_rts_toggle
+
+        if transport == "tcp":
+            host = ln.get("host", "") or ""
+            port = ln.get("port", "") or ""
+            timeout = ln.get("timeout", "") or ""
+            # rs485 для tcp не имеет смысла
+        else:
+            device = ln.get("device", "") or ""
+            baudrate = ln.get("baudrate", "") or ""
+            parity = ln.get("parity", "") or ""
+            stopbits = ln.get("stopbits", "") or ""
+            timeout = ln.get("timeout", "") or ""
+            rts = ln.get("rs485_rts_toggle", "")
+
         for nd in ln.get("nodes", []) or []:
             unit = nd.get("unit_id", "")
+            obj = nd.get("object", "")
+            num_obj = nd.get("num_object", "")
+
             for p in nd.get("params", []) or []:
+                mp = _migrate_param_ms_to_s(p)
+
                 ws.append([
                     line_name,
+                    transport,
+                    device,
+                    host,
+                    port,
+                    baudrate,
+                    parity,
+                    stopbits,
+                    timeout,
+                    prb,
+                    rts,
+
                     unit,
-                    p.get("name",""),
-                    p.get("register_type",""),
-                    p.get("address",""),
-                    p.get("words", 1),
-                    p.get("data_type","u16"),
-                    p.get("word_order","AB"),
-                    p.get("scale", 1.0),
-                    p.get("mode","r"),
-                    p.get("publish_mode","on_change"),
-                    p.get("publish_interval_s", 0),
-                    p.get("topic") or "",
-                    p.get("step", None),
-                    p.get("hysteresis", None),
+                    obj,
+                    num_obj,
+
+                    mp.get("name", ""),
+                    mp.get("register_type", ""),
+                    mp.get("address", ""),
+                    mp.get("words", 1),
+                    mp.get("data_type", "u16"),
+                    mp.get("word_order", "AB"),
+                    mp.get("scale", 1.0),
+                    mp.get("mode", "r"),
+                    mp.get("publish_mode", "on_change"),
+                    mp.get("publish_interval_s", 0),
+                    mp.get("topic") or "",
+                    mp.get("step", None),
+                    mp.get("hysteresis", None),
                 ])
 
     buf = io.BytesIO()
-    wb.save(buf); buf.seek(0)
+    wb.save(buf)
+    buf.seek(0)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -569,109 +730,203 @@ async def import_params_xlsx(file: UploadFile = File(...)):
     headers_row = [str(c.value or "").strip() for c in ws[1]]
     idx = {name: i for i, name in enumerate(headers_row)}
 
-    required = ["Линия","Unit","Параметр","Тип","Адрес"]
+    required = ["Линия", "Unit", "Параметр", "Тип", "Адрес"]
     missing = [h for h in required if h not in idx]
     if missing:
         raise HTTPException(400, f"В файле отсутствуют колонки: {', '.join(missing)}")
 
-    cfg = settings.get_cfg()
+    def cell(row, key):
+        if key not in idx:
+            return None
+        return row[idx[key]]
+
+    cfg = _cfg()
+
+    # Будем собирать новый список lines ТОЛЬКО из файла (как у тебя сейчас)
     new_lines: Dict[str, Dict[str, Any]] = {}
     nodes_by_key: Dict[tuple, Dict[str, Any]] = {}
     total_params = 0
+
+    # флаги "первая строка уже задавала настройки"
+    line_settings_taken: Dict[str, bool] = {}
+    node_meta_taken: Dict[tuple, bool] = {}
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not any(row):
             continue
 
-        def cv(key, cast=None, default=None):
-            if key not in idx:
-                return default
-            v = row[idx[key]]
-            if v in (None, ""):
-                return default
-            if cast is None:
-                return v
-            try:
-                return cast(v)
-            except Exception:
-                return default
-
-        line_name = str(cv("Линия", str, "")).strip()
+        line_name = _to_str(cell(row, "Линия")).strip()
         if not line_name:
             continue
-        unit_id = cv("Unit", int, 0)
-        name    = str(cv("Параметр", str, "")).strip()
-        reg_type = str(cv("Тип", str, "")).strip()
-        address  = cv("Адрес", int, None)
 
-        if not (unit_id and name and reg_type and address is not None):
+        unit_id = _parse_int(cell(row, "Unit"), None)
+        pname = _to_str(cell(row, "Параметр")).strip()
+        reg_type = _to_str(cell(row, "Тип")).strip()
+        address = _parse_int(cell(row, "Адрес"), None)
+
+        if unit_id is None or not pname or not reg_type or address is None:
             continue
 
-        words = cv("Words", int, 1)
-        data_type = str(cv("DataType", str, "u16")).strip() or "u16"
-        word_order = str(cv("WordOrder", str, "AB")).strip() or "AB"
-
-        scale    = cv("Scale", float, 1.0)
-        mode     = str(cv("Mode", str, "r")).strip()
-        pmode    = str(cv("Publish", str, "on_change")).strip()
-        pint_s = cv("Interval, s", float, 0.0)
-        topic    = str(cv("Topic", str, "")).strip() or None
-
-        step = cv("Step", float, None)
-        hysteresis = cv("Hysteresis", float, None)
-
-        # --- соберём структуру cfg ---
+        # ---------- ensure line ----------
         line = new_lines.get(line_name)
         if not line:
-            existing = next((ln for ln in cfg.get("lines", []) if ln.get("name")==line_name), None)
-            if existing:
-                line = {k: existing.get(k) for k in ("name","device","baudrate","timeout","parity","stopbits","port_retry_backoff_s","rs485_rts_toggle","nodes")}
-                line["name"] = line_name
+            # если была такая линия в текущем YAML — возьмём дефолты из неё
+            exist = _find_line(cfg, line_name)
+            if exist:
+                line = deepcopy(exist)
                 line["nodes"] = []
             else:
-                line = {"name": line_name, "device": "", "baudrate": 9600, "timeout": 0.1, "parity": "N", "stopbits": 1, "port_retry_backoff_s": 5, "nodes": []}
+                line = {
+                    "name": line_name,
+                    "transport": "serial",
+                    "device": "",
+                    "baudrate": 9600,
+                    "timeout": 0.1,
+                    "parity": "N",
+                    "stopbits": 1,
+                    "port_retry_backoff_s": 5,
+                    "rs485_rts_toggle": False,
+                    "nodes": [],
+                }
             new_lines[line_name] = line
 
-        key = (line_name, unit_id)
-        node = nodes_by_key.get(key)
+        # ---------- line settings (take first suitable row only) ----------
+        # ---------- line settings (take first COMPLETE row only) ----------
+        if not line_settings_taken.get(line_name, False):
+            transport_cell = _to_str(cell(row, "Transport")).strip().lower()
+            transport = transport_cell or (line.get("transport") or "serial")
+            transport = (transport or "serial").strip().lower()
+
+            if transport == "tcp":
+                host_v = _to_str(cell(row, "Host")).strip()
+                port_v = _parse_int(cell(row, "Port"), None)
+
+                # "полная" строка для tcp
+                if host_v and port_v is not None:
+                    line["transport"] = "tcp"
+                    line["host"] = host_v
+                    line["port"] = int(port_v)
+
+                    timeout = _parse_float_ru(cell(row, "Timeout, s"), None)
+                    prb = _parse_int(cell(row, "port_retry_backoff_s"), None)
+                    if timeout is not None:
+                        line["timeout"] = float(timeout)
+                    if prb is not None:
+                        line["port_retry_backoff_s"] = int(prb)
+
+                    line_settings_taken[line_name] = True
+
+            else:
+                dev_v = _to_str(cell(row, "Device")).strip()
+
+                # "полная" строка для serial
+                if dev_v:
+                    line["transport"] = transport  # "serial"/"rtu"
+                    line["device"] = dev_v
+
+                    baudrate = _parse_int(cell(row, "Baudrate"), None)
+                    parity = _to_str(cell(row, "Parity")).strip().upper()
+                    stopbits = _parse_int(cell(row, "Stopbits"), None)
+                    timeout = _parse_float_ru(cell(row, "Timeout, s"), None)
+                    prb = _parse_int(cell(row, "port_retry_backoff_s"), None)
+                    rts = cell(row, "rs485_rts_toggle")
+
+                    if baudrate is not None:
+                        line["baudrate"] = int(baudrate)
+                    if parity in ("N", "E", "O"):
+                        line["parity"] = parity
+                    if stopbits in (1, 2):
+                        line["stopbits"] = int(stopbits)
+                    if timeout is not None:
+                        line["timeout"] = float(timeout)
+                    if prb is not None:
+                        line["port_retry_backoff_s"] = int(prb)
+                    if rts is not None and rts != "":
+                        if isinstance(rts, bool):
+                            line["rs485_rts_toggle"] = bool(rts)
+                        else:
+                            line["rs485_rts_toggle"] = str(rts).strip().lower() in ("1", "true", "да", "yes", "y")
+
+                    line_settings_taken[line_name] = True
+
+
+        # ---------- ensure node ----------
+        nkey = (line_name, int(unit_id))
+        node = nodes_by_key.get(nkey)
         if not node:
-            # объект сюда из XLSX не тащим — идентификация по Unit
+            # попытаемся взять object/num_object из текущего YAML как дефолт
+            exist_ln = _find_line(cfg, line_name)
+            exist_nd = _find_node(exist_ln, int(unit_id)) if exist_ln else None
+
             node = {"unit_id": int(unit_id), "params": []}
-            # если линия уже была — сохраним существующий object (если есть)
-            exist_ln = next((ln for ln in (cfg.get("lines", []) or []) if ln.get("name")==line_name), None)
-            exist_nd = None
-            if exist_ln:
-                exist_nd = next((nd for nd in (exist_ln.get("nodes", []) or []) if int(nd.get("unit_id", -1)) == int(unit_id)), None)
             if exist_nd:
                 node["object"] = exist_nd.get("object", f"unit{unit_id}")
                 if "num_object" in exist_nd:
                     node["num_object"] = exist_nd.get("num_object")
             else:
                 node["object"] = f"unit{unit_id}"
-            nodes_by_key[key] = node
-            line["nodes"].append(node)
+
+            nodes_by_key[nkey] = node
+            line.setdefault("nodes", []).append(node)
+
+        # ---------- node meta (take first non-empty object/num_object for this unit) ----------
+        if not node_meta_taken.get(nkey, False):
+            obj = _to_str(cell(row, "Object")).strip()
+            num_obj = _parse_int(cell(row, "Num_object"), None)
+
+            if obj:
+                node["object"] = obj
+            if num_obj is not None:
+                node["num_object"] = int(num_obj)
+
+            if obj or num_obj is not None:
+                node_meta_taken[nkey] = True
+
+        # ---------- param fields (each row) ----------
+        words = _parse_int(cell(row, "Words"), 1) or 1
+        data_type = (_to_str(cell(row, "DataType")).strip() or "u16")
+        word_order = (_to_str(cell(row, "WordOrder")).strip() or "AB")
+        scale = _parse_float_ru(cell(row, "Scale"), 1.0) or 1.0
+        mode = (_to_str(cell(row, "Mode")).strip() or "r")
+        pmode = (_to_str(cell(row, "Publish")).strip() or "on_change")
+        pint_s = _parse_float_ru(cell(row, "Interval, s"), 0.0) or 0.0
+        topic = _to_str(cell(row, "Topic")).strip() or None
+        step = _parse_float_ru(cell(row, "Step"), None)
+        hyst = _parse_float_ru(cell(row, "Hysteresis"), None)
 
         param = {
-            "name": name,
+            "name": pname,
             "register_type": reg_type,
             "address": int(address),
-            "words": int(words or 1),
+            "words": int(words),
             "data_type": data_type,
             "word_order": word_order,
-            "scale": float(scale or 1.0),
+            "scale": float(scale),
             "mode": mode,
             "publish_mode": pmode,
-            "publish_interval_s": float(pint_s or 0.0),
-            "topic": topic
+            "publish_interval_s": float(pint_s),
+            "topic": topic,
         }
-        if step is not None: param["step"] = step
-        if hysteresis is not None: param["hysteresis"] = hysteresis
+        if step is not None:
+            param["step"] = float(step)
+        if hyst is not None:
+            param["hysteresis"] = float(hyst)
 
-        node["params"].append(param)
+        param = _migrate_param_ms_to_s(param)
+
+        # replace param with same name (чтобы импорт был идемпотентным)
+        plist: List[Dict[str, Any]] = node.setdefault("params", [])
+        prev = next((pp for pp in plist if pp.get("name") == pname), None)
+        if prev:
+            plist.remove(prev)
+        plist.append(param)
+
         total_params += 1
 
     cfg["lines"] = list(new_lines.values())
+    cfg = _normalize_lines_for_yaml(cfg)
     backup = _write_cfg(cfg)
+
     try:
         hot_reload_lines(cfg)
     except Exception as e:

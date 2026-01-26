@@ -1,0 +1,112 @@
+flows:
+- id: eeb9d856-39b2-45e6-8540-687a9cbf72e0
+  name: Комплекс РАДУЖНЫЙ
+  type: telegram
+  enabled: false
+  options:
+    telegram:
+      bot_token: 7748412244:AAGFDFbxZxfTwnecO0zJ7FRu6IcB576EuBc
+      chat_id: '580097120'
+    ronet: {}
+  params:
+  - key: line1|44|второй параметр
+    alias: мощность чайника
+    path: ЖК Крылья / Дом 1
+    nominal: 1
+    tolerance: null
+    ok_text: в норме
+    alarm_text: авария
+    tag: ''
+  events:
+    group_window_s: 1
+    selected: []
+    exceptions: []
+  intervals:
+    group_window_s: 10
+    selected: []
+    exceptions: []
+- id: f48703ec-08b4-4dc4-9a57-1f6ce4bede64
+  name: Отработка автоматики
+  type: automation_logs
+  enabled: true
+  options:
+    telegram:
+      bot_token: 7748412244:AAGFDFbxZxfTwnecO0zJ7FRu6IcB576EuBc
+      chat_id: '580097120'
+    ronet: {}
+  params:
+  - key: реле334646364пуццу
+    alias: релешка3
+    path: ЖК Крылья / Дом 1
+    nominal: null
+    tolerance: null
+    ok_text: в норме
+    alarm_text: авария
+    tag: ''
+  events:
+    group_window_s: 10
+    selected: []
+    exceptions: []
+  intervals:
+    group_window_s: 60
+    selected: []
+    exceptions: []
+- id: ronet-1
+  name: Комплекс РАДУЖНЫЙ → RoNet
+  type: ronet
+  enabled: true
+  options:
+    telegram: {}
+    ronet:
+      broker_host: 127.0.0.1
+      broker_port: 1883
+      client_id: alerts-ronet-1
+      topic: umsmart/data
+      qos: 0
+      retain: false
+      um_name: UM SMART
+      um_serial: '500000555555'
+      um_fw: '33965'
+      measure: aMonth
+      device_id: 16
+      meter: 16
+      device_serial: '45456565'
+      device_model: Меркурий 237
+      device_type: 42
+      tz_offset_minutes: 180
+  params:
+  - key: line1|224|реле1
+    alias: Энергия активная A+0
+    path: ЖК Радужный / Дом 1 / ВРУ-1
+    nominal: null
+    tolerance: null
+    ok_text: OK
+    alarm_text: ALARM
+    tag: A+0
+  - key: line1|224|реле2
+    alias: Энергия активная A-0
+    path: ЖК Радужный / Дом 1 / ВРУ-1
+    nominal: null
+    tolerance: null
+    ok_text: OK
+    alarm_text: ALARM
+    tag: A-0
+  - key: line1|224|реле3
+    alias: Энергия реактивная R+0
+    path: ЖК Радужный / Дом 1 / ВРУ-1
+    nominal: null
+    tolerance: null
+    ok_text: OK
+    alarm_text: ALARM
+    tag: R+0
+  events:
+    group_window_s: 10
+    selected:
+    - line1|224|реле1
+    - line1|224|реле2
+    - line1|224|реле3
+    exceptions: []
+  intervals:
+    group_window_s: 60
+    selected: []
+    exceptions: []

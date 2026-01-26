@@ -43,8 +43,9 @@ polling:
     max_bits: 64
     max_registers: 60
 lines:
-- name: line2
-  device: COM4
+- name: line1
+  transport: serial
+  device: /dev/ttyUSB3
   baudrate: 115200
   timeout: 0.1
   parity: N
@@ -52,34 +53,385 @@ lines:
   port_retry_backoff_s: 1
   rs485_rts_toggle: false
   nodes:
-  - unit_id: 224
-    object: щочик
+  - unit_id: 101
     params:
-    - name: аааа
-      register_type: input
-      address: 6656
-      words: 4
-      data_type: u64
-      word_order: ABCD
-      scale: 1
-      mode: r
-      publish_mode: on_change
-      publish_interval_s: 0
-      topic: null
-      step: null
-      hysteresis: null
-    - name: '5136'
-      register_type: input
-      address: 5136
+    - name: закрыть воду
+      register_type: coil
+      address: 16
       words: 1
       data_type: u16
       word_order: AB
-      scale: 1
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Закрыть воду
+    - name: открыть воду
+      register_type: coil
+      address: 17
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Открыть воду
+    - name: Насос питание
+      register_type: coil
+      address: 2
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Насос
+    - name: Компрессор питание
+      register_type: coil
+      address: 3
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
       mode: r
-      publish_mode: on_change
-      publish_interval_s: 0
-      topic: null
-      step: null
-      hysteresis: null
-    num_object: null
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Копмрессор
+    - name: Водоочистка
+      register_type: coil
+      address: 4
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Водоочистка
+    - name: Резерв
+      register_type: coil
+      address: 5
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Резерв
+    object: Реле бойлер
+    num_object: 1
+  - unit_id: 68
+    params:
+    - name: Свет бойлерная
+      register_type: coil
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Свет
+    - name: Свет коридор вход
+      register_type: coil
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Свет коридор вход
+    - name: Свет коридор
+      register_type: coil
+      address: 2
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Свет коридор
+    - name: Свет комната
+      register_type: coil
+      address: 3
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Комната 1 этаж/Свет
+    - name: Свет кухня
+      register_type: coil
+      address: 4
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Кухня/Свет
+    - name: Свет ванна
+      register_type: coil
+      address: 5
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Ванна/Свет
+    object: Реле свет
+    num_object: 2
+  - unit_id: 125
+    params:
+    - name: скор
+      register_type: holding
+      address: 110
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: r
+      publish_mode: interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Температура
+    - name: Напряжение Фаза Б
+      register_type: input
+      address: 4313
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.01
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Температура
+      step: 5.0
+      hysteresis: 1.0
+    - name: Частота Фаза Б
+      register_type: input
+      address: 4344
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.01
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Температура
+      step: 1.0
+      hysteresis: 0.1
+    object: Счетчик в доме
+    num_object: 3
+- name: line2
   transport: serial
+  device: /dev/ttyUSB2
+  baudrate: 115200
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 1
+  rs485_rts_toggle: false
+  nodes:
+  - unit_id: 81
+    params:
+    - name: Температура бойлерная
+      register_type: input
+      address: 4
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 0.01
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Температура
+      step: 2.0
+      hysteresis: 1.0
+    - name: Влажность бойлерная
+      register_type: input
+      address: 5
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 0.01
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Влажность
+      step: 5.0
+      hysteresis: 1.0
+    - name: Температура подачи
+      register_type: input
+      address: 6
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 0.0625
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Т подачи котла
+      step: 5.0
+      hysteresis: 1.0
+    - name: Температура обратки
+      register_type: input
+      address: 7
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 0.0625
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Т обратки котла
+      step: 5.0
+      hysteresis: 1.0
+    object: Температура бойлерная
+    num_object: 4
+  - unit_id: 228
+    params:
+    - name: давление отопления
+      register_type: input
+      address: 2
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.0001
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Давление отопления
+      step: 0.5
+      hysteresis: 0.1
+    object: Давление котла
+    num_object: 5
+  - unit_id: 240
+    params:
+    - name: давление воды
+      register_type: input
+      address: 2
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.0001
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Бойлерная/Давление воды
+      step: 0.5
+      hysteresis: 0.1
+    object: Давление воды
+    num_object: 6
+  - unit_id: 218
+    params:
+    - name: Температура на улице
+      register_type: input
+      address: 7
+      words: 1
+      data_type: s16
+      word_order: AB
+      scale: 0.0625
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Дом/Улица/Температура
+      step: 3.0
+      hysteresis: 1.0
+    object: Температура улицы
+    num_object: 7
+- name: line_banya
+  transport: tcp
+  host: 192.168.7.11
+  port: 23
+  timeout: 3.0
+  port_retry_backoff_s: 5
+  nodes:
+  - unit_id: 1
+    params:
+    - name: Влажность бани
+      register_type: holding
+      address: 1
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Баня/Влажность
+      step: 30.0
+      hysteresis: 5.0
+    - name: Температура бани
+      register_type: holding
+      address: 0
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 0.1
+      mode: r
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Баня/Температура
+      step: 2.0
+      hysteresis: 1.0
+    object: Датчик T_H бани
+  - unit_id: 69
+    params:
+    - name: Штору закрыть
+      register_type: coil
+      address: 17
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Баня/Штору открыть
+    - name: Штору открыть
+      register_type: coil
+      address: 16
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: rw
+      publish_mode: on_change_and_interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Баня/Штору закрыть
+    object: Реле бани
+    num_object: 8
+- name: line_masterskaya
+  transport: tcp
+  host: 192.168.7.10
+  port: 23
+  timeout: 3.0
+  port_retry_backoff_s: 5
+  nodes:
+  - unit_id: 187
+    params:
+    - name: адрес счетчика
+      register_type: holding
+      address: 128
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1.0
+      mode: r
+      publish_mode: interval
+      publish_interval_s: 3600.0
+      topic: /Черноморье/Мастерская/Адрес счетчика
+    object: Счетчик мастерской
+    num_object: 9

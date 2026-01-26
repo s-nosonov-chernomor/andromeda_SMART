@@ -1,0 +1,85 @@
+debug:
+  enabled: true
+  log_reads: true
+  summary_every_s: 20
+mqtt:
+  host: 127.0.0.1
+  port: 1883
+  base_topic: /devices
+  qos: 0
+  retain: false
+  client_id: uspd-modbus-gw
+db:
+  url: sqlite:///./data/data.db
+alerts:
+  insecure_tls: false
+  http_timeout_s: 10
+history:
+  max_rows: 50000
+  ttl_days: 15
+  cleanup_every: 500
+backups:
+  dir: ./data/backups
+  keep: 10
+serial:
+  echo: false
+addressing:
+  normalize: false
+service:
+  unit: agent.service
+  restart_cmd: ''
+andromeda:
+  restart_cmd: /usr/local/bin/restart-andromeda.sh
+current:
+  touch_read_every_s: 3
+polling:
+  interval_ms: 1000
+  jitter_ms: 120
+  backoff_ms: 500
+  max_errors_before_backoff: 5
+  port_retry_backoff_s: 5
+  batch_read:
+    enabled: true
+    max_bits: 64
+    max_registers: 60
+lines:
+- name: line2
+  device: COM4
+  baudrate: 115200
+  timeout: 0.1
+  parity: N
+  stopbits: 1
+  port_retry_backoff_s: 1
+  rs485_rts_toggle: false
+  nodes:
+  - unit_id: 224
+    object: щочик
+    params:
+    - name: аааа
+      register_type: input
+      address: 6656
+      words: 4
+      data_type: u64
+      word_order: ABCD
+      scale: 0.001
+      mode: r
+      publish_mode: on_change
+      publish_interval_s: 0
+      topic: null
+      step: 2.3
+      hysteresis: 0.1
+    - name: '5136'
+      register_type: input
+      address: 5136
+      words: 1
+      data_type: u16
+      word_order: AB
+      scale: 1
+      mode: r
+      publish_mode: on_change
+      publish_interval_s: 0
+      topic: null
+      step: null
+      hysteresis: null
+    num_object: 555555
+  transport: serial
