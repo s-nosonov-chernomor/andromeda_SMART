@@ -1,0 +1,13 @@
+uvicorn
+fastapi
+itsdangerous
+pyyaml
+pydantic_settings
+passlib
+jinja2
+openpyxl
+sqlalchemy
+minimalmodbus
+python-multipart
+paho-mqtt
+requests
