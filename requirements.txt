@@ -11,3 +11,4 @@ minimalmodbus
 python-multipart
 paho-mqtt
 requests
+pymodbus
