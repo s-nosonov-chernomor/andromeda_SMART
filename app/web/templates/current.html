@@ -32,15 +32,24 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
 
     <div class="filters">
       <span id="updInfo" class="badge">—</span>
+
+      <select id="pageSize" class="select" style="width:130px">
+        <option value="100">100 строк</option>
+        <option value="200">200 строк</option>
+        <option value="500">500 строк</option>
+      </select>
+
       <select id="autoEvery" class="select" style="width:140px">
         <option value="2000">каждые 2s</option>
         <option value="5000">каждые 5s</option>
         <option value="10000">каждые 10s</option>
         <option value="0">ручной режим</option>
       </select>
+
       <button class="btn btn-ghost" id="btnRefresh" type="button">Обновить</button>
       <button class="btn btn-primary" id="btnPause" type="button">Пауза</button>
     </div>
+
     <button class="btn btn-ghost" id="btn-export-current">Экспорт XLSX</button>
   </div>
 
@@ -67,6 +76,13 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     </table>
   </div>
 
+  <div class="toolbar" style="justify-content: space-between; margin-top: 10px;">
+    <div id="pageInfo" class="muted">—</div>
+    <div class="filters">
+      <button class="btn btn-ghost" id="btnPrevPage" type="button">← Назад</button>
+      <button class="btn btn-ghost" id="btnNextPage" type="button">Вперед →</button>
+    </div>
+  </div>
   <div class="footer">Если значение отсутствует, показываем <span class="badge">null</span> и код/описание ошибки.</div>
 </div>
 
@@ -75,9 +91,13 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
   const $ = (s)=>document.querySelector(s);
   const tb = $('#tblCurrent tbody');
   const updInfo = $('#updInfo');
+  const pageInfo = $('#pageInfo');
   const btnRefresh = $('#btnRefresh');
   const btnPause = $('#btnPause');
+  const btnPrevPage = $('#btnPrevPage');
+  const btnNextPage = $('#btnNextPage');
   const selEvery = $('#autoEvery');
+  const pageSizeEl = $('#pageSize');
   const fltText = $('#fltText');
   const fltLine = $('#fltLine');
   const fltObject = $('#fltObject');
@@ -86,6 +106,11 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
   let timer = null;
   let everyMs = parseInt(selEvery.value, 10);
   let paused = false;
+
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalRows = 0;
+  let filteredRows = 0;
 
   const lastValues = new Map(); // key -> last value
   let lastData = [];
@@ -129,31 +154,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     return `${x.value}`;
   }
 
-  // Мягкие фильтры, не отбрасываем неизвестные/пустые значения
-  function applyFilters(list){
-    const q = safeStr(fltText.value).trim().toLowerCase();
-    const lineSel = safeStr(fltLine.value);
-    const objSel  = safeStr(fltObject.value);
-    const codeMode = safeStr(fltCode.value);
-
-    return list.filter(x=>{
-      const obj = safeStr(x.object), prm = safeStr(x.param);
-      const line = safeStr(x.line);
-      const codeNum = Number(x.code ?? 0);
-      const isNull = (x.value === null || x.value === undefined);
-
-      if (q && !(obj.toLowerCase().includes(q) || prm.toLowerCase().includes(q))) return false;
-      if (lineSel && line !== lineSel) return false;
-      if (objSel && obj !== objSel) return false;
-
-      if (codeMode === 'ok'   && !(codeNum === 0 && !isNull)) return false;
-      if (codeMode === 'err'  && !(codeNum !== 0)) return false;
-      if (codeMode === 'null' && !isNull) return false;
-
-      return true;
-    });
-  }
-
   // Пересобираем селекты только если наборы реально изменились
   function rebuildFiltersIfNeeded(list){
     const lines = new Set();
@@ -193,19 +193,9 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
   }
 
   function render(list){
-    // стабильная сортировка (объект → параметр)
-    const sorted = [...list].sort((a,b)=>{
-      const ao = safeStr(a.object), bo = safeStr(b.object);
-      if (ao < bo) return -1; if (ao > bo) return 1;
-      const ap = safeStr(a.param), bp = safeStr(b.param);
-      if (ap < bp) return -1; if (ap > bp) return 1;
-      return 0;
-    });
-
-    const filtered = applyFilters(sorted);
     tb.innerHTML = '';
 
-    for (const x of filtered) {
+    for (const x of list) {
       const key = keyOf(x);
       const prev = lastValues.get(key);
       const changed = (prev !== undefined && prev !== x.value);
@@ -246,21 +236,43 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
       lastValues.set(key, x.value);
     }
 
-    updInfo.textContent = `Обновлено: ${fmtTime()} • всего: ${list.length} • показано: ${filtered.length}`;
+    updInfo.textContent = `Обновлено: ${fmtTime()} • строк на странице: ${list.length}`;
     updateTicksOnce();
 
   }
 
   async function load(){
     try{
-      const r = await fetch('/api/current', {cache:'no-store'});
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        page_size: String(parseInt(pageSizeEl.value, 10) || 100),
+        q: safeStr(fltText.value).trim(),
+        line: safeStr(fltLine.value),
+        object: safeStr(fltObject.value),
+        status: safeStr(fltCode.value),
+      });
+
+      const r = await fetch(`/api/current?${params.toString()}`, {cache:'no-store'});
       if(!r.ok) throw new Error(await r.text());
-      const data = await r.json();
-      lastData = Array.isArray(data) ? data : [];
-      rebuildFiltersIfNeeded(lastData);
-      render(lastData);
+
+      const payload = await r.json();
+      const items = Array.isArray(payload.items) ? payload.items : [];
+
+      totalRows = Number(payload.total || 0);
+      filteredRows = Number(payload.filtered_total || 0);
+      currentPage = Number(payload.page || 1);
+      totalPages = Number(payload.pages || 1);
+
+      lastData = items;
+      rebuildFiltersIfNeeded(items);
+      render(items);
+
+      pageInfo.textContent = `Страница ${currentPage} / ${totalPages} • найдено: ${filteredRows} • всего: ${totalRows}`;
+      btnPrevPage.disabled = currentPage <= 1;
+      btnNextPage.disabled = currentPage >= totalPages;
     }catch(e){
       updInfo.textContent = 'Ошибка загрузки';
+      pageInfo.textContent = '—';
       console.error(e);
     }
   }
@@ -307,10 +319,34 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     btnPause.textContent = paused ? 'Возобновить' : 'Пауза';
     reschedule();
   });
+  btnPrevPage.addEventListener('click', ()=>{
+    if (currentPage > 1) {
+      currentPage--;
+      load();
+    }
+  });
+
+  btnNextPage.addEventListener('click', ()=>{
+    if (currentPage < totalPages) {
+      currentPage++;
+      load();
+    }
+  });
+
+  pageSizeEl.addEventListener('change', ()=>{
+    currentPage = 1;
+    load();
+  });
 
   [fltText, fltLine, fltObject, fltCode].forEach(el=>{
-    el.addEventListener('input', ()=> render(lastData));
-    el.addEventListener('change', ()=> render(lastData));
+    el.addEventListener('input', ()=>{
+      currentPage = 1;
+      load();
+    });
+    el.addEventListener('change', ()=>{
+      currentPage = 1;
+      load();
+    });
   });
 
   document.getElementById('btn-export-current').onclick = async ()=>{

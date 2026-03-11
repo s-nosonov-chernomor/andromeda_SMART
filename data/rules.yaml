@@ -1,7 +1,36 @@
 rules:
+- id: relay6_on_action
+  name: Включить реле6 (через trigger_rule)
+  status: disabled
+  description: Включает реле6; запускается только другим правилом
+  virtual_tags: []
+  condition: ''
+  options:
+    fire_mode: edge
+    min_interval_sec: 1.0
+  actions:
+  - id: relay6_on
+    type: mqtt_publish
+    sequential_order: 0
+    description: Включить реле6
+    mqtt:
+      topic: /devices/unit180/controls/реле6/on
+      payload:
+        value: '1'
+      qos: 0
+      retain: false
+  - id: log_relay6_on
+    type: log
+    sequential_order: 1
+    description: Лог включения реле6
+    log:
+      message: Включили реле6 по trigger_rule
+      level: INFO
+      extra:
+        reason: rеле1
 - id: relay_4_5_on_when_3_on
   name: Включить реле 4 и 5 при включении реле 3
-  status: enabled
+  status: disabled
   description: Если реле3 = 1 и реле4/5 ещё выключены — включаем их
   virtual_tags: []
   conditions:
@@ -55,7 +84,7 @@ rules:
         source_param: реле334646364пуццу
 - id: relay_4_5_off_when_2_on
   name: Выключить 4 и 5 если реле2 включено
-  status: enabled
+  status: disabled
   description: Включается реле2 — отключаются реле4 и реле5
   virtual_tags: []
   conditions:
@@ -108,7 +137,7 @@ rules:
         source_param: реле2
 - id: relay1_triggers_relay6
   name: Запустить включение реле6 при включении реле1
-  status: enabled
+  status: disabled
   description: Если реле1 == 1 — запуск правила relay6_on_action
   virtual_tags: []
   conditions:
@@ -141,7 +170,7 @@ rules:
         source_param: реле1
 - id: __2__6
   name: при включении реле2 отключим реле6
-  status: enabled
+  status: disabled
   description: Ну просто отключит реле6 когда реле2 вкл
   virtual_tags: []
   conditions:
@@ -164,32 +193,3 @@ rules:
       payload: 0
       qos: 0
       retain: false
-- id: relay6_on_action
-  name: Включить реле6 (через trigger_rule)
-  status: disabled
-  description: Включает реле6; запускается только другим правилом
-  virtual_tags: []
-  condition: ''
-  options:
-    fire_mode: edge
-    min_interval_sec: 1.0
-  actions:
-  - id: relay6_on
-    type: mqtt_publish
-    sequential_order: 0
-    description: Включить реле6
-    mqtt:
-      topic: /devices/unit180/controls/реле6/on
-      payload:
-        value: '1'
-      qos: 0
-      retain: false
-  - id: log_relay6_on
-    type: log
-    sequential_order: 1
-    description: Лог включения реле6
-    log:
-      message: Включили реле6 по trigger_rule
-      level: INFO
-      extra:
-        reason: rеле1

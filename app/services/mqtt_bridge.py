@@ -12,7 +12,7 @@ from app.services.current_store import current_store  # ← ДОБАВИЛИ
 from app.services.alerts_runtime import engine_instance
 
 from app.persay.runtime import notify_tag_update
-
+from sqlalchemy import text
 
 import logging
 
@@ -274,18 +274,22 @@ class MqttBridge:
                         cleanup_every = int(H.get("cleanup_every", cleanup_every) or cleanup_every)
                         ttl_days = int(H.get("ttl_days", ttl_days) or ttl_days)
                         max_rows = int(H.get("max_rows", max_rows) or max_rows)
-                        from sqlalchemy import text
 
-                        if ttl_days>0:
-                            s.execute("DELETE FROM telemetry_events WHERE ts < :cutoff",
-                                      {"cutoff": datetime.utcnow()-timedelta(days=ttl_days)})
+                        cutoff = ts_utc - timedelta(days=ttl_days)
+
+                        if ttl_days > 0:
+                            s.execute(
+                                text("DELETE FROM telemetry_events WHERE ts < :cutoff"),
+                                {"cutoff": cutoff},
+                            )
+
                         if max_rows>0:
                             s.execute(text("""
                                 DELETE FROM telemetry_events
-                                WHERE id IN (
+                                WHERE id NOT IN (
                                   SELECT id FROM telemetry_events
                                   ORDER BY id DESC
-                                  LIMIT -1 OFFSET :keep
+                                  LIMIT :keep
                                 )
                             """), {"keep": max_rows})
                         s.commit()
@@ -298,8 +302,10 @@ class MqttBridge:
                         trigger = str(
                             (payload.get("metadata", {}).get("status_code", {}) or {}).get("trigger", "")
                         ).strip().lower()
-                        if trigger not in ("event", "interval"):
-                            trigger = "event"
+                        if trigger in ("interval",):
+                            pub_kind = "interval"
+                        else:
+                            pub_kind = "event"  # change/heartbeat/прочее
 
                         # время публикации, если есть ISO-метка
                         ts_iso = (payload.get("metadata", {}) or {}).get("timestamp")
@@ -316,7 +322,7 @@ class MqttBridge:
                             unit_id=int(ctx.get("unit_id", 0) or 0),
                             name=ctx.get("param", ""),
                             value=payload.get("value"),
-                            pub_kind=trigger,
+                            pub_kind=pub_kind,
                             ts=ts_dt
                         )
                 except Exception as e:

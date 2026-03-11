@@ -7,6 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
 from time import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,6 +18,10 @@ from passlib.hash import pbkdf2_sha256
 from app.core.config import settings
 
 router = APIRouter()
+
+class UiAuthRequired(Exception):
+    def __init__(self, next_url: str | None = None):
+        self.next_url = next_url or "/current"
 
 # ── шаблоны ──────────────────────────────────────────────────────────────────
 APP_DIR = Path(__file__).resolve().parents[2]       # .../app
@@ -85,9 +90,22 @@ def _require_session(request: Request) -> str:
     user = request.session.get("auth_user")
     until = request.session.get("auth_until")
     now = int(time())
+
     if (not user) or (not until) or (int(until) < now):
         request.session.clear()
+
+        # полный путь, чтобы после логина можно было вернуться туда же
+        next_url = request.url.path or "/current"
+        if request.url.query:
+            next_url = f"{next_url}?{request.url.query}"
+
+        # для WEB-страниц делаем редирект через специальное исключение
+        if not next_url.startswith("/api/"):
+            raise UiAuthRequired(next_url=next_url)
+
+        # для API оставляем обычный 401
         raise HTTPException(status_code=401, detail="Not authenticated")
+
     return user
 
 # ── DTO ──────────────────────────────────────────────────────────────────────
@@ -99,11 +117,6 @@ class ChangePasswordDTO(BaseModel):
     old_password: str
     new_password: str
     confirm_new_password: str
-
-# ── UI: страница логина ──────────────────────────────────────────────────────
-@router.get("/ui/login", response_class=HTMLResponse)
-def ui_login(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "title": "Вход"})
 
 # ── API: логин / логаут / смена пароля ───────────────────────────────────────
 @router.post("/api/auth/login")
@@ -170,3 +183,4 @@ async def change_password(request: Request):
 # чтобы совпадали имена из твоего main.py
 ensure_default_user = _ensure_default_user
 require_session = _require_session
+UiAuthRequired = UiAuthRequired

@@ -121,17 +121,17 @@ class RuleEngine:
             pass
 
         # Для отладки: покажем, что знаем по основным реле
-        for tname in ("реле1", "реле2", "реле3", "реле4", "реле5", "реле6"):
-            tv = eval_tag_map.get(tname)
-            if tv is None:
-                log.debug("eval_map[%s]: <no value>", tname)
-            else:
-                log.debug(
-                    "eval_map[%s]: value=%r ts=%s",
-                    tname,
-                    tv.value,
-                    tv.ts.isoformat() if isinstance(tv.ts, datetime) else tv.ts,
-                )
+        # for tname in ("реле1", "реле2", "реле3", "реле4", "реле5", "реле6"):
+        #     tv = eval_tag_map.get(tname)
+        #     if tv is None:
+        #         log.debug("eval_map[%s]: <no value>", tname)
+        #     else:
+        #         log.debug(
+        #             "eval_map[%s]: value=%r ts=%s",
+        #             tname,
+        #             tv.value,
+        #             tv.ts.isoformat() if isinstance(tv.ts, datetime) else tv.ts,
+        #         )
 
         # вне lock — прогоняем правила
         for rule in rules:

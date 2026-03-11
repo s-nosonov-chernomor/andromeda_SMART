@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Depends, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -17,6 +18,7 @@ from app.api.routes.account import (
     router as account_router,
     _ensure_default_user as ensure_default_user,   # создать user/default, если нет
     _require_session as require_session,           # защита UI-страниц
+    UiAuthRequired,
 )
 
 # Остальные роутеры API
@@ -61,6 +63,14 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_s
 # статика и шаблоны
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+@app.exception_handler(UiAuthRequired)
+async def handle_ui_auth_required(request: Request, exc: UiAuthRequired):
+    next_url = exc.next_url or "/current"
+    return RedirectResponse(
+        url=f"/ui/login?next={quote(next_url, safe='/=?&')}",
+        status_code=302,
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Подключаем роутеры

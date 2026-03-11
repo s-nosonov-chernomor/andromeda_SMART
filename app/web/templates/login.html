@@ -56,6 +56,7 @@
     const toast = $('#toast');
     const pwd  = $('#password');
     const togglePwd = $('#togglePwd');
+    const nextUrl = new URLSearchParams(window.location.search).get('next') || '/current';
 
     function showToast(text){
       toast.textContent = text;
@@ -94,8 +95,7 @@
 
         if (r.ok) {
           showToast('Добро пожаловать!');
-          // небольшая задержка, чтобы показать тост
-          setTimeout(()=> location.href = '/current', 200);
+          setTimeout(()=> location.href = nextUrl, 200);
         } else {
           // попытаемся вытащить detail, иначе просто текст
           let text = 'Ошибка входа';
