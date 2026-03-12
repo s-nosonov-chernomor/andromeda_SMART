@@ -112,12 +112,8 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
   let totalRows = 0;
   let filteredRows = 0;
 
-  const lastValues = new Map(); // key -> last value
+  const lastValues = new Map();
   let lastData = [];
-
-  // Кэш наборов для селектов, чтобы не пересобирать без нужды
-  let cachedLines = new Set();
-  let cachedObjects = new Set();
 
   const keyOf = (x) => `${safeStr(x.object)}|${safeStr(x.param)}`;
 
@@ -142,6 +138,7 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     const d = new Date(ts);
     return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   }
+
   function fmtSilent(s){
     if(s == null) return '';
     return `${s}s`;
@@ -152,44 +149,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
       return `<span class="muted"><i>null</i></span>`;
     }
     return `${x.value}`;
-  }
-
-  // Пересобираем селекты только если наборы реально изменились
-  function rebuildFiltersIfNeeded(list){
-    const lines = new Set();
-    const objs = new Set();
-    for (const x of list) {
-      const l = safeStr(x.line);
-      const o = safeStr(x.object);
-      if (l) lines.add(l);
-      if (o) objs.add(o);
-    }
-
-    const sameLines = setsEqual(lines, cachedLines);
-    const sameObjs  = setsEqual(objs, cachedObjects);
-
-    if (!sameLines) {
-      const cur = fltLine.value;
-      fltLine.innerHTML = `<option value="">Линия: все</option>` +
-        [...lines].sort().map(v=>`<option value="${v}">${v}</option>`).join('');
-      // если текущее значение всё ещё есть — восстанавливаем
-      if (!cur || lines.has(cur)) fltLine.value = cur;
-      cachedLines = lines;
-    }
-
-    if (!sameObjs) {
-      const cur = fltObject.value;
-      fltObject.innerHTML = `<option value="">Объект: все</option>` +
-        [...objs].sort().map(v=>`<option value="${v}">${v}</option>`).join('');
-      if (!cur || objs.has(cur)) fltObject.value = cur;
-      cachedObjects = objs;
-    }
-  }
-
-  function setsEqual(a, b){
-    if (a.size !== b.size) return false;
-    for (const v of a) if (!b.has(v)) return false;
-    return true;
   }
 
   function render(list){
@@ -208,7 +167,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
         <td>${safeStr(x.param)}</td>
         <td>${valCell(x)}</td>
 
-        <!-- Время опроса -->
         <td class="mono">
           ${fmtTs(x.last_ok_ts)}<br>
           <span class="muted tick" data-type="ok" data-ts="${x.last_ok_ts || ''}">
@@ -216,7 +174,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
           </span>
         </td>
 
-        <!-- Время публикации -->
         <td class="mono">
           ${fmtTs(x.last_pub_ts)}<br>
           <span class="muted tick" data-type="pub" data-ts="${x.last_pub_ts || ''}">
@@ -238,7 +195,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
 
     updInfo.textContent = `Обновлено: ${fmtTime()} • строк на странице: ${list.length}`;
     updateTicksOnce();
-
   }
 
   async function load(){
@@ -264,7 +220,6 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
       totalPages = Number(payload.pages || 1);
 
       lastData = items;
-      rebuildFiltersIfNeeded(items);
       render(items);
 
       pageInfo.textContent = `Страница ${currentPage} / ${totalPages} • найдено: ${filteredRows} • всего: ${totalRows}`;
@@ -277,13 +232,40 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     }
   }
 
+  async function loadMeta(){
+    try{
+      const r = await fetch('/api/current/meta', {cache:'no-store'});
+      if(!r.ok) throw new Error(await r.text());
+
+      const meta = await r.json();
+      const lines = Array.isArray(meta.lines) ? meta.lines : [];
+      const objects = Array.isArray(meta.objects) ? meta.objects : [];
+
+      const curLine = fltLine.value;
+      const curObj = fltObject.value;
+
+      fltLine.innerHTML =
+        `<option value="">Линия: все</option>` +
+        lines.map(v => `<option value="${v}">${v}</option>`).join('');
+
+      fltObject.innerHTML =
+        `<option value="">Объект: все</option>` +
+        objects.map(v => `<option value="${v}">${v}</option>`).join('');
+
+      if (!curLine || lines.includes(curLine)) fltLine.value = curLine;
+      if (!curObj || objects.includes(curObj)) fltObject.value = curObj;
+    } catch(e){
+      console.error('meta load error', e);
+    }
+  }
+
   function reschedule(){
     if (timer) clearInterval(timer);
     if (!paused && everyMs > 0) {
       timer = setInterval(load, everyMs);
     }
   }
-    // ───────── тикер секундомеров (локально раз/сек) ─────────
+
   let tickTimer = null;
 
   function updateTicksOnce(){
@@ -300,25 +282,23 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
 
   function startTicking(){
     if (tickTimer) return;
-    updateTicksOnce(); // сразу обновим после рендера
+    updateTicksOnce();
     tickTimer = setInterval(updateTicksOnce, 1000);
   }
 
-  function stopTicking(){
-    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-  }
-
-  // events
   btnRefresh.addEventListener('click', load);
+
   selEvery.addEventListener('change', ()=>{
     everyMs = parseInt(selEvery.value, 10) || 0;
     reschedule();
   });
+
   btnPause.addEventListener('click', ()=>{
     paused = !paused;
     btnPause.textContent = paused ? 'Возобновить' : 'Пауза';
     reschedule();
   });
+
   btnPrevPage.addEventListener('click', ()=>{
     if (currentPage > 1) {
       currentPage--;
@@ -338,11 +318,15 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     load();
   });
 
-  [fltText, fltLine, fltObject, fltCode].forEach(el=>{
-    el.addEventListener('input', ()=>{
-      currentPage = 1;
-      load();
-    });
+  let searchTimer = null;
+
+  fltText.addEventListener('input', ()=>{
+    currentPage = 1;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(load, 250);
+  });
+
+  [fltLine, fltObject, fltCode].forEach(el=>{
     el.addEventListener('change', ()=>{
       currentPage = 1;
       load();
@@ -359,28 +343,26 @@ tr.changed { animation: flashRow 900ms ease-in-out; }
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(a.href);
   };
-  // init
 
   const searchEl = document.getElementById('fltText');
 
-  // помечаем, что пользователь сам что-то печатал
   searchEl.addEventListener('input', () => { searchEl.dataset.userTyped = '1'; }, { once: true });
 
-  // аккуратно чистим то, что подставил браузер
   const clearAutofill = () => {
     if (searchEl && searchEl.value && !searchEl.dataset.userTyped) {
       searchEl.value = '';
       searchEl.dispatchEvent(new Event('input', { bubbles: true }));
     }
   };
-  // два таймаута — на случай, если менеджер паролей заполняет позже
+
   setTimeout(clearAutofill, 80);
   setTimeout(clearAutofill, 300);
 
-  load();
+  loadMeta().then(() => load());
   reschedule();
   startTicking();
 
 })();
 </script>
+
 {% endblock %}

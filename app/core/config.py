@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # секрет для cookie-сессий
     session_secret: str = Field(default="change-me-please")
 
+    # имя и версия приложения
+    app_name: str = Field(default="SMART PERSAY", validation_alias="APP_NAME")
+    app_version: str = Field(default="120326", validation_alias="APP_VERSION")
+
     # путь к основному YAML (можно переопределить переменной окружения CONFIG_FILE)
     config_file: str = Field(default="config.yaml", validation_alias="CONFIG_FILE")
 

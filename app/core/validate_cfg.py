@@ -65,6 +65,16 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     if not url:
         raise ValueError("db.url: обязателен (например sqlite:///./data/data.db)")
 
+    # ─── alerts ───
+    alerts = cfg.get("alerts", {})
+    if alerts:
+        if not isinstance(alerts, dict):
+            raise ValueError("alerts: должен быть объектом")
+        if "insecure_tls" in alerts:
+            _as_bool(alerts["insecure_tls"], "alerts.insecure_tls")
+        if "http_timeout_s" in alerts:
+            _as_float(alerts["http_timeout_s"], "alerts.http_timeout_s", 1.0)
+
     # ─── serial ───
     serial = cfg.get("serial", {})
     if serial and not isinstance(serial, dict):
@@ -127,12 +137,41 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
     pol = cfg.get("polling", {})
     if not isinstance(pol, dict):
         raise ValueError("polling: должен быть объектом")
+
     _as_int(pol.get("interval_ms", 1000), "polling.interval_ms", 1)
     _as_int(pol.get("jitter_ms", 0), "polling.jitter_ms", 0)
     _as_int(pol.get("backoff_ms", 0), "polling.backoff_ms", 0)
     _as_int(pol.get("max_errors_before_backoff", 0), "polling.max_errors_before_backoff", 0)
+
     if "port_retry_backoff_s" in pol:
         _as_int(pol.get("port_retry_backoff_s", 0), "polling.port_retry_backoff_s", 0)
+
+    if "inter_request_delay_ms" in pol:
+        _as_int(pol.get("inter_request_delay_ms", 0), "polling.inter_request_delay_ms", 0)
+
+    if "crc_retry_count" in pol:
+        _as_int(pol.get("crc_retry_count", 0), "polling.crc_retry_count", 0)
+
+    if "crc_retry_delay_ms" in pol:
+        _as_int(pol.get("crc_retry_delay_ms", 0), "polling.crc_retry_delay_ms", 0)
+
+    if "write_coalesce_ms" in pol:
+        _as_int(pol.get("write_coalesce_ms", 0), "polling.write_coalesce_ms", 0)
+
+    if "write_max_tasks" in pol:
+        _as_int(pol.get("write_max_tasks", 1), "polling.write_max_tasks", 1)
+
+    if "write_max_bits" in pol:
+        _as_int(pol.get("write_max_bits", 1), "polling.write_max_bits", 1)
+
+    if "write_max_registers" in pol:
+        _as_int(pol.get("write_max_registers", 1), "polling.write_max_registers", 1)
+
+    if "unit_error_skip_s" in pol:
+        _as_float(pol.get("unit_error_skip_s", 0.0), "polling.unit_error_skip_s", 0.0)
+
+    if "skip_node_on_timeout" in pol:
+        _as_bool(pol["skip_node_on_timeout"], "polling.skip_node_on_timeout")
 
     br = pol.get("batch_read", {})
     if br:
@@ -142,6 +181,34 @@ def validate_cfg(cfg: Dict[str, Any]) -> None:
             _as_bool(br["enabled"], "polling.batch_read.enabled")
         _as_int(br.get("max_bits", 1), "polling.batch_read.max_bits", 1)
         _as_int(br.get("max_registers", 1), "polling.batch_read.max_registers", 1)
+
+    fm = pol.get("fast_modbus", {})
+    if fm:
+        if not isinstance(fm, dict):
+            raise ValueError("polling.fast_modbus: должен быть объектом")
+
+        if "enabled" in fm:
+            _as_bool(fm["enabled"], "polling.fast_modbus.enabled")
+        if "interval_ms" in fm:
+            _as_int(fm["interval_ms"], "polling.fast_modbus.interval_ms", 1)
+        if "jitter_ms" in fm:
+            _as_int(fm["jitter_ms"], "polling.fast_modbus.jitter_ms", 0)
+        if "max_events_per_poll" in fm:
+            _as_int(fm["max_events_per_poll"], "polling.fast_modbus.max_events_per_poll", 1)
+        if "bootstrap_pause_ms" in fm:
+            _as_int(fm["bootstrap_pause_ms"], "polling.fast_modbus.bootstrap_pause_ms", 0)
+        if "rx_gap_ms" in fm:
+            _as_int(fm["rx_gap_ms"], "polling.fast_modbus.rx_gap_ms", 0)
+        if "rx_hard_timeout_ms" in fm:
+            _as_int(fm["rx_hard_timeout_ms"], "polling.fast_modbus.rx_hard_timeout_ms", 1)
+        if "poll_idle_sleep_ms" in fm:
+            _as_int(fm["poll_idle_sleep_ms"], "polling.fast_modbus.poll_idle_sleep_ms", 0)
+        if "poll_pending_sleep_ms" in fm:
+            _as_int(fm["poll_pending_sleep_ms"], "polling.fast_modbus.poll_pending_sleep_ms", 0)
+        if "protocol_debug" in fm:
+            _as_bool(fm["protocol_debug"], "polling.fast_modbus.protocol_debug")
+        if "test_enabled" in fm:
+            _as_bool(fm["test_enabled"], "polling.fast_modbus.test_enabled")
 
     # ─── debug ───
     dbg = cfg.get("debug", {})

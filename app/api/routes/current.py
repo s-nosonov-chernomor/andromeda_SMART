@@ -151,3 +151,16 @@ def export_current_xlsx():
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="current.xlsx"'},
     )
+
+@router.get("/api/current/meta")
+def current_meta():
+    items = current_store.list()
+
+    lines = sorted({str(x.get("line") or "") for x in items if str(x.get("line") or "")})
+    objects = sorted({str(x.get("object") or "") for x in items if str(x.get("object") or "")})
+
+    return {
+        "lines": lines,
+        "objects": objects,
+        "total": len(items),
+    }

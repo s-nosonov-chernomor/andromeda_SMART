@@ -25,6 +25,192 @@
 
   <div class="collapsible-body">
 
+    <!-- ───────── Справка: сворачиваемые подсказки и профили ───────── -->
+    <details class="card collapsible" style="margin-top:10px;">
+      <summary class="collapsible-summary">
+        <div class="collapsible-title">
+          <h3 style="margin:0">Рекомендуемые диапазоны и подсказки</h3>
+          <span class="muted">Практические ориентиры для типовых линий Modbus</span>
+        </div>
+        <div class="collapsible-actions">
+          <span class="muted">Открыть / скрыть</span>
+        </div>
+      </summary>
+
+      <div class="collapsible-body">
+        <div class="muted" style="margin-bottom:10px;">
+          Это не жёсткие ограничения, а практические ориентиры. Если устройства медленные, нестабильные,
+          линия длинная или шумная — выбирайте более осторожные значения и постепенно ускоряйте систему.
+        </div>
+
+        <div class="grid cols-2">
+          <div>
+            <h4 style="margin:0 0 8px 0;">Основной polling</h4>
+            <div class="muted"><b>interval_ms</b>: обычно <span class="badge">300–1000</span>. Ниже — быстрее обновление, но выше нагрузка.</div>
+            <div class="muted"><b>jitter_ms</b>: обычно <span class="badge">0–100</span>. Полезно для сглаживания пиков.</div>
+            <div class="muted"><b>inter_request_delay_ms</b>: обычно <span class="badge">0–30</span>. Для слабых приборов полезно <span class="badge">5–20</span>.</div>
+            <div class="muted"><b>backoff_ms</b>: обычно <span class="badge">100–1000</span>.</div>
+            <div class="muted"><b>max_errors_before_backoff</b>: обычно <span class="badge">2–5</span>.</div>
+            <div class="muted"><b>port_retry_backoff_s</b>: обычно <span class="badge">1–10</span> секунд.</div>
+            <div class="muted"><b>unit_error_skip_s</b>: обычно <span class="badge">0–5</span>. Если один прибор тормозит линию — полезно <span class="badge">1–3</span>.</div>
+            <div class="muted"><b>skip_node_on_timeout</b>: полезно включать на длинных линиях, чтобы один зависший узел не тормозил остальных.</div>
+          </div>
+
+          <div>
+            <h4 style="margin:0 0 8px 0;">CRC / запись / batch</h4>
+            <div class="muted"><b>crc_retry_count</b>: обычно <span class="badge">0–2</span>.</div>
+            <div class="muted"><b>crc_retry_delay_ms</b>: обычно <span class="badge">10–100</span> мс.</div>
+            <div class="muted"><b>write_coalesce_ms</b>: обычно <span class="badge">20–200</span> мс.</div>
+            <div class="muted"><b>write_max_tasks</b>: обычно <span class="badge">100–1000</span>.</div>
+            <div class="muted"><b>write_max_bits</b>: обычно <span class="badge">8–64</span>.</div>
+            <div class="muted"><b>write_max_registers</b>: обычно <span class="badge">4–32</span>.</div>
+            <div class="muted"><b>batch_read.enabled</b>: лучше включать, если адреса плотные и идут подряд.</div>
+            <div class="muted"><b>batch_read.max_bits</b>: обычно <span class="badge">16–128</span>.</div>
+            <div class="muted"><b>batch_read.max_registers</b>: обычно <span class="badge">8–64</span>.</div>
+          </div>
+
+          <div>
+            <h4 style="margin:12px 0 8px 0;">Fast Modbus</h4>
+            <div class="muted"><b>fast_modbus.enabled</b>: включать только там, где реально нужен быстрый контур.</div>
+            <div class="muted"><b>fast_modbus.interval_ms</b>: обычно <span class="badge">20–100</span>.</div>
+            <div class="muted"><b>fast_modbus.jitter_ms</b>: обычно <span class="badge">0–20</span>.</div>
+            <div class="muted"><b>fast_modbus.max_events_per_poll</b>: обычно <span class="badge">50–500</span>.</div>
+            <div class="muted"><b>fast_modbus.bootstrap_pause_ms</b>: обычно <span class="badge">10–200</span>.</div>
+            <div class="muted"><b>fast_modbus.rx_gap_ms</b>: обычно <span class="badge">5–50</span>.</div>
+            <div class="muted"><b>fast_modbus.rx_hard_timeout_ms</b>: обычно <span class="badge">100–1000</span>.</div>
+            <div class="muted"><b>fast_modbus.poll_idle_sleep_ms</b>: обычно <span class="badge">50–500</span>.</div>
+            <div class="muted"><b>fast_modbus.poll_pending_sleep_ms</b>: обычно <span class="badge">50–300</span>.</div>
+          </div>
+
+          <div>
+            <h4 style="margin:12px 0 8px 0;">Практические советы</h4>
+            <div class="muted">Если устройства <b>старые или медленные</b> — увеличивайте <span class="badge">timeout</span>, <span class="badge">inter_request_delay_ms</span> и не ставьте слишком агрессивный fast modbus.</div>
+            <div class="muted">Если линия <b>шумная</b> — помогает <span class="badge">crc_retry_count</span> и небольшая <span class="badge">crc_retry_delay_ms</span>.</div>
+            <div class="muted">Если один прибор <b>виснет и тормозит всю шину</b> — включайте <span class="badge">skip_node_on_timeout</span> и задавайте <span class="badge">unit_error_skip_s</span>.</div>
+            <div class="muted"><b>protocol_debug</b> и <b>test_enabled</b> обычно включают только на время диагностики.</div>
+            <div class="muted"><b>insecure_tls</b> включать только для тестов и самоподписанных сертификатов.</div>
+            <div class="muted">Если после изменений стало хуже — вернитесь к более мягким значениям и увеличьте паузы между запросами.</div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="card collapsible" style="margin-top:10px; margin-bottom:10px;">
+      <summary class="collapsible-summary">
+        <div class="collapsible-title">
+          <h3 style="margin:0">Готовые профили настройки</h3>
+          <span class="muted">Быстрые стартовые ориентиры для разных типов объектов</span>
+        </div>
+        <div class="collapsible-actions">
+          <span class="muted">Открыть / скрыть</span>
+        </div>
+      </summary>
+
+      <div class="collapsible-body">
+        <div class="muted" style="margin-bottom:10px;">
+          Ниже — не автоматическое применение, а готовые примеры значений. Пользователь может просто посмотреть
+          и вручную перенести их в поля ниже, если профиль подходит под его объект.
+        </div>
+
+        <div class="grid cols-2">
+          <div class="card" style="padding:12px">
+            <h4 style="margin-top:0;">Профиль 1. Осторожный / стабильный</h4>
+            <div class="muted" style="margin-bottom:8px;">
+              Подходит для слабых приборов, длинных RS-485 линий, нестабильных адаптеров, объектов где важнее стабильность, чем скорость.
+            </div>
+
+            <div class="muted"><b>interval_ms</b> = <span class="badge">800</span></div>
+            <div class="muted"><b>jitter_ms</b> = <span class="badge">50</span></div>
+            <div class="muted"><b>backoff_ms</b> = <span class="badge">500</span></div>
+            <div class="muted"><b>max_errors_before_backoff</b> = <span class="badge">3</span></div>
+            <div class="muted"><b>inter_request_delay_ms</b> = <span class="badge">15</span></div>
+            <div class="muted"><b>crc_retry_count</b> = <span class="badge">1</span></div>
+            <div class="muted"><b>crc_retry_delay_ms</b> = <span class="badge">30</span></div>
+            <div class="muted"><b>unit_error_skip_s</b> = <span class="badge">2.0</span></div>
+            <div class="muted"><b>skip_node_on_timeout</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.enabled</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.max_bits</b> = <span class="badge">32</span></div>
+            <div class="muted"><b>batch_read.max_registers</b> = <span class="badge">20</span></div>
+            <div class="muted"><b>fast_modbus.enabled</b> = <span class="badge">false</span></div>
+
+            <div class="muted" style="margin-top:10px;">
+              Когда выбирать: если на линии бывают таймауты, CRC-ошибки, “подвисающие” приборы или важно минимизировать риск сбоев.
+            </div>
+          </div>
+
+          <div class="card" style="padding:12px">
+            <h4 style="margin-top:0;">Профиль 2. Сбалансированный</h4>
+            <div class="muted" style="margin-bottom:8px;">
+              Универсальный стартовый профиль для большинства нормальных объектов без явных проблем по линии.
+            </div>
+
+            <div class="muted"><b>interval_ms</b> = <span class="badge">500</span></div>
+            <div class="muted"><b>jitter_ms</b> = <span class="badge">30</span></div>
+            <div class="muted"><b>backoff_ms</b> = <span class="badge">200</span></div>
+            <div class="muted"><b>max_errors_before_backoff</b> = <span class="badge">3</span></div>
+            <div class="muted"><b>inter_request_delay_ms</b> = <span class="badge">10</span></div>
+            <div class="muted"><b>crc_retry_count</b> = <span class="badge">1</span></div>
+            <div class="muted"><b>crc_retry_delay_ms</b> = <span class="badge">20–30</span></div>
+            <div class="muted"><b>unit_error_skip_s</b> = <span class="badge">1.0–2.0</span></div>
+            <div class="muted"><b>skip_node_on_timeout</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.enabled</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.max_bits</b> = <span class="badge">32–64</span></div>
+            <div class="muted"><b>batch_read.max_registers</b> = <span class="badge">20–40</span></div>
+            <div class="muted"><b>fast_modbus.enabled</b> = <span class="badge">false</span> или <span class="badge">true</span> только для специальных быстрых сценариев</div>
+
+            <div class="muted" style="margin-top:10px;">
+              Когда выбирать: если объект обычный, линия нормальная, а нужна разумная скорость без лишней агрессии.
+            </div>
+          </div>
+
+          <div class="card" style="padding:12px">
+            <h4 style="margin-top:0;">Профиль 3. Быстрый / отзывчивый</h4>
+            <div class="muted" style="margin-bottom:8px;">
+              Для коротких качественных линий, быстрых устройств и сценариев, где важна высокая частота обновления.
+            </div>
+
+            <div class="muted"><b>interval_ms</b> = <span class="badge">200–300</span></div>
+            <div class="muted"><b>jitter_ms</b> = <span class="badge">0–20</span></div>
+            <div class="muted"><b>backoff_ms</b> = <span class="badge">100–200</span></div>
+            <div class="muted"><b>max_errors_before_backoff</b> = <span class="badge">2</span></div>
+            <div class="muted"><b>inter_request_delay_ms</b> = <span class="badge">0–5</span></div>
+            <div class="muted"><b>crc_retry_count</b> = <span class="badge">0–1</span></div>
+            <div class="muted"><b>crc_retry_delay_ms</b> = <span class="badge">10–20</span></div>
+            <div class="muted"><b>unit_error_skip_s</b> = <span class="badge">0–1</span></div>
+            <div class="muted"><b>skip_node_on_timeout</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.enabled</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>batch_read.max_bits</b> = <span class="badge">64</span></div>
+            <div class="muted"><b>batch_read.max_registers</b> = <span class="badge">32–64</span></div>
+            <div class="muted"><b>fast_modbus.enabled</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>fast_modbus.interval_ms</b> = <span class="badge">20–50</span></div>
+
+            <div class="muted" style="margin-top:10px;">
+              Когда выбирать: если линия действительно качественная и ты уверен, что оборудование выдерживает частый опрос.
+            </div>
+          </div>
+
+          <div class="card" style="padding:12px">
+            <h4 style="margin-top:0;">Профиль 4. Диагностика / поиск проблем</h4>
+            <div class="muted" style="margin-bottom:8px;">
+              Не для постоянной эксплуатации. Используется, когда нужно понять, что происходит на линии и почему есть ошибки.
+            </div>
+
+            <div class="muted"><b>debug.enabled</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>debug.log_reads</b> = <span class="badge">true</span></div>
+            <div class="muted"><b>debug.summary_every_s</b> = <span class="badge">10–30</span></div>
+            <div class="muted"><b>fast_modbus.protocol_debug</b> = <span class="badge">true</span> только если реально нужен разбор fast modbus</div>
+            <div class="muted"><b>crc_retry_count</b> = <span class="badge">1–2</span> для проверки поведения линии</div>
+            <div class="muted"><b>inter_request_delay_ms</b> = <span class="badge">10–30</span> чтобы снизить шум от перегрузки</div>
+            <div class="muted"><b>skip_node_on_timeout</b> = <span class="badge">true</span>, если нужен обзор по всей линии, а не зависание на одном приборе</div>
+
+            <div class="muted" style="margin-top:10px;">
+              После диагностики такие режимы лучше выключать или ослаблять, иначе лог будет быстро расти, а нагрузка на систему станет выше.
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+
     <div class="grid cols-2" style="margin-top:10px">
       <!-- MQTT -->
       <div class="card" style="padding:12px">
@@ -55,41 +241,210 @@
         </div>
       </div>
 
+            <!-- Alerts -->
+      <div class="card" style="padding:12px">
+        <h3>Оповещения / HTTP</h3>
+        <div class="grid cols-2">
+          <div title="Таймаут HTTP-запросов при отправке уведомлений, вебхуков и внешних вызовов. Если слишком маленький — медленные серверы будут считаться недоступными.">
+            <label class="label">alerts.http_timeout_s</label>
+            <input class="input" id="alerts_http_timeout_s" type="number" min="1" step="1" placeholder="10">
+            <div class="muted">Сколько секунд ждать ответ от удалённого HTTP-сервиса.</div>
+          </div>
+
+          <div title="Разрешить небезопасный TLS: сертификат сервера не будет строго проверяться. Использовать только для тестов, самоподписанных сертификатов и временной диагностики.">
+            <label class="label">alerts.insecure_tls</label>
+            <div>
+              <input id="alerts_insecure_tls" type="checkbox">
+              <span class="muted">разрешить небезопасный TLS / пропускать строгую проверку сертификата</span>
+            </div>
+            <div class="muted">На боевых системах лучше держать выключенным.</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Polling -->
       <div class="card" style="padding:12px">
         <h3>Опрос (polling)</h3>
         <div class="grid cols-3">
-          <div title="Период основного цикла опроса">
+          <div title="Период основного цикла опроса всех линий и узлов. Чем меньше значение — тем чаще обновляются данные, но тем выше нагрузка на CPU, порт и шину.">
             <label class="label">interval_ms</label>
             <input class="input" id="poll_interval" type="number" min="1" step="1">
+            <div class="muted">Базовый период общего цикла опроса.</div>
           </div>
-          <div title="Случайная добавка к интервалу для сглаживания пиков">
+
+          <div title="Случайный разброс интервала. Нужен, чтобы не было жёстко одинаковых пачек запросов и пиков нагрузки.">
             <label class="label">jitter_ms</label>
             <input class="input" id="poll_jitter" type="number" min="0" step="1">
+            <div class="muted">Небольшой случайный разброс вокруг interval_ms.</div>
           </div>
-          <div title="Пауза бэкоффа для проблемного узла">
+
+          <div title="Пауза после серии ошибок перед повторными попытками опроса проблемного узла.">
             <label class="label">backoff_ms</label>
             <input class="input" id="poll_backoff" type="number" min="0" step="1">
+            <div class="muted">Сдерживает слишком частые повторы при ошибках.</div>
           </div>
-          <div title="Сколько подряд ошибок до временного замедления узла">
+
+          <div title="Сколько подряд ошибок допускается до включения режима backoff.">
             <label class="label">max_errors_before_backoff</label>
             <input class="input" id="poll_maxerr" type="number" min="0" step="1">
+            <div class="muted">После этого числа ошибок узел временно опрашивается осторожнее.</div>
           </div>
-          <div title="Как часто пытаться переоткрыть порт, если он упал/занят">
+
+          <div title="Если COM-порт или интерфейс упал, через сколько секунд пробовать открыть его заново.">
             <label class="label">port_retry_backoff_s</label>
             <input class="input" id="poll_port_retry" type="number" min="1" step="1">
+            <div class="muted">Интервал повторного открытия порта/транспорта.</div>
           </div>
-          <div title="Пакетное чтение последовательных регистров">
+
+          <div title="Небольшая пауза между соседними запросами Modbus. Часто помогает старым устройствам, адаптерам и перегруженным линиям.">
+            <label class="label">inter_request_delay_ms</label>
+            <input class="input" id="poll_inter_request_delay_ms" type="number" min="0" step="1">
+            <div class="muted">Задержка между последовательными запросами.</div>
+          </div>
+
+          <div title="Сколько раз повторить чтение/запись при подозрении на ошибку CRC.">
+            <label class="label">crc_retry_count</label>
+            <input class="input" id="poll_crc_retry_count" type="number" min="0" step="1">
+            <div class="muted">Повторы только для CRC-ошибок.</div>
+          </div>
+
+          <div title="Пауза перед повторной попыткой после CRC-ошибки.">
+            <label class="label">crc_retry_delay_ms</label>
+            <input class="input" id="poll_crc_retry_delay_ms" type="number" min="0" step="1">
+            <div class="muted">Небольшая пауза между CRC retry.</div>
+          </div>
+
+          <div title="На сколько секунд временно исключать узел из активного опроса после ошибки.">
+            <label class="label">unit_error_skip_s</label>
+            <input class="input" id="poll_unit_error_skip_s" type="number" min="0" step="0.1">
+            <div class="muted">Временный пропуск проблемного unit.</div>
+          </div>
+
+          <div title="Если timeout по одному узлу произошёл, сразу переходить к следующему, не пытаясь агрессивно добивать текущий.">
+            <label class="label">skip_node_on_timeout</label>
+            <div>
+              <input id="poll_skip_node_on_timeout" type="checkbox">
+              <span class="muted">после timeout переходить к следующему узлу</span>
+            </div>
+            <div class="muted">Полезно для длинных линий, чтобы один зависший прибор не тормозил всех.</div>
+          </div>
+
+          <div title="Собирать несколько команд записи в одну пачку перед отправкой.">
+            <label class="label">write_coalesce_ms</label>
+            <input class="input" id="poll_write_coalesce_ms" type="number" min="0" step="1">
+            <div class="muted">Окно накопления команд записи.</div>
+          </div>
+
+          <div title="Максимальное число ожидающих задач записи в очереди.">
+            <label class="label">write_max_tasks</label>
+            <input class="input" id="poll_write_max_tasks" type="number" min="1" step="1">
+            <div class="muted">Ограничение очереди команд записи.</div>
+          </div>
+
+          <div title="Максимум битов в одной операции записи (coil/discrete).">
+            <label class="label">write_max_bits</label>
+            <input class="input" id="poll_write_max_bits" type="number" min="1" step="1">
+            <div class="muted">Размер пачки записи битов.</div>
+          </div>
+
+          <div title="Максимум регистров в одной операции записи (holding/input где применимо).">
+            <label class="label">write_max_registers</label>
+            <input class="input" id="poll_write_max_registers" type="number" min="1" step="1">
+            <div class="muted">Размер пачки записи регистров.</div>
+          </div>
+
+          <div title="Пакетное чтение последовательных адресов вместо множества одиночных запросов. Сильно снижает нагрузку и ускоряет опрос.">
             <label class="label">batch_read.enabled</label>
-            <div><input id="batch_enabled" type="checkbox"> <span class="muted">пакетное чтение</span></div>
+            <div><input id="batch_enabled" type="checkbox"> <span class="muted">включить пакетное чтение</span></div>
+            <div class="muted">Рекомендуется для плотных карт регистров.</div>
           </div>
-          <div title="Максимум битов (coil/discrete) в одном запросе">
+
+          <div title="Максимум битов (coil/discrete) в одном пакетном запросе.">
             <label class="label">batch_read.max_bits</label>
             <input class="input" id="batch_max_bits" type="number" min="1" step="1">
+            <div class="muted">Ограничение на размер пакетного чтения битов.</div>
           </div>
-          <div title="Максимум регистров (holding/input) в одном запросе">
+
+          <div title="Максимум регистров (holding/input) в одном пакетном запросе.">
             <label class="label">batch_read.max_registers</label>
             <input class="input" id="batch_max_regs" type="number" min="1" step="1">
+            <div class="muted">Ограничение на размер пакетного чтения регистров.</div>
+          </div>
+        </div>
+      </div>
+
+            <!-- Fast Modbus -->
+      <div class="card" style="padding:12px">
+        <h3>Fast Modbus</h3>
+        <div class="muted" style="margin-bottom:10px;">
+          Ускоренный режим опроса для чувствительных сценариев. Использовать аккуратно: слишком агрессивные настройки могут перегрузить линию, адаптер или медленные устройства.
+        </div>
+
+        <div class="grid cols-3">
+          <div title="Включить отдельный быстрый контур опроса Fast Modbus.">
+            <label class="label">fast_modbus.enabled</label>
+            <div><input id="fm_enabled" type="checkbox"> <span class="muted">включить fast modbus</span></div>
+            <div class="muted">Главный переключатель режима.</div>
+          </div>
+
+          <div title="Базовый период быстрого цикла опроса.">
+            <label class="label">fast_modbus.interval_ms</label>
+            <input class="input" id="fm_interval_ms" type="number" min="1" step="1">
+            <div class="muted">Чем меньше, тем чаще быстрый опрос.</div>
+          </div>
+
+          <div title="Случайный разброс интервала для fast modbus.">
+            <label class="label">fast_modbus.jitter_ms</label>
+            <input class="input" id="fm_jitter_ms" type="number" min="0" step="1">
+            <div class="muted">Помогает избежать жёсткой синхронизации запросов.</div>
+          </div>
+
+          <div title="Максимум событий/изменений за один цикл fast modbus.">
+            <label class="label">fast_modbus.max_events_per_poll</label>
+            <input class="input" id="fm_max_events_per_poll" type="number" min="1" step="1">
+            <div class="muted">Ограничивает объём обработки за один проход.</div>
+          </div>
+
+          <div title="Пауза после старта fast modbus перед началом активной работы.">
+            <label class="label">fast_modbus.bootstrap_pause_ms</label>
+            <input class="input" id="fm_bootstrap_pause_ms" type="number" min="0" step="1">
+            <div class="muted">Полезно при запуске и горячей перезагрузке.</div>
+          </div>
+
+          <div title="Пауза между приходом байтов/кадров, используемая как признак разрыва приёма.">
+            <label class="label">fast_modbus.rx_gap_ms</label>
+            <input class="input" id="fm_rx_gap_ms" type="number" min="0" step="1">
+            <div class="muted">Настройка чувствительности к разрыву RX-потока.</div>
+          </div>
+
+          <div title="Жёсткий предел ожидания ответа. По истечении этого времени кадр считается потерянным.">
+            <label class="label">fast_modbus.rx_hard_timeout_ms</label>
+            <input class="input" id="fm_rx_hard_timeout_ms" type="number" min="1" step="1">
+            <div class="muted">Защищает от зависания на ожидании ответа.</div>
+          </div>
+
+          <div title="Сколько спать, если быстрый цикл сейчас пуст и делать нечего.">
+            <label class="label">fast_modbus.poll_idle_sleep_ms</label>
+            <input class="input" id="fm_poll_idle_sleep_ms" type="number" min="0" step="1">
+            <div class="muted">Экономит CPU в простое.</div>
+          </div>
+
+          <div title="Сколько спать, если есть ожидающие задачи или накопленные события.">
+            <label class="label">fast_modbus.poll_pending_sleep_ms</label>
+            <input class="input" id="fm_poll_pending_sleep_ms" type="number" min="0" step="1">
+            <div class="muted">Регулирует частоту обработки при активной работе.</div>
+          </div>
+
+          <div title="Печатать подробные служебные сообщения fast modbus в лог. Полезно только для диагностики.">
+            <label class="label">fast_modbus.protocol_debug</label>
+            <div><input id="fm_protocol_debug" type="checkbox"> <span class="muted">подробный протокольный debug</span></div>
+            <div class="muted">На бою лучше выключать, чтобы не засорять лог.</div>
+          </div>
+
+          <div title="Включить тестовый режим fast modbus. Использовать только для отладки и проверок.">
+            <label class="label">fast_modbus.test_enabled</label>
+            <div><input id="fm_test_enabled" type="checkbox"> <span class="muted">включить тестовый режим</span></div>
+            <div class="muted">Для обычной эксплуатации обычно выключено.</div>
           </div>
         </div>
       </div>
@@ -175,7 +530,7 @@
         <div class="grid cols-2">
           <div>
             <label class="label">systemd unit</label>
-            <input class="input" id="svc_unit" placeholder="agent.service" title="Имя сервиса в systemd">>
+            <input class="input" id="svc_unit" placeholder="agent.service" title="Имя сервиса в systemd">
           </div>
           <div>
             <label class="label">restart_cmd</label>
@@ -225,6 +580,7 @@
   </summary>
 
   <div class="collapsible-body">
+    <div id="lines-status" class="muted" style="margin:8px 0 10px;">—</div>
     <div id="lines-wrap"></div>
   </div>
 </details>
@@ -246,6 +602,7 @@
     <label class="btn btn-primary" for="file-import-xlsx" style="cursor:pointer;">Импорт XLSX</label>
     <input type="file" id="file-import-xlsx" accept=".xlsx" style="display:none">
   </div>
+  <div id="params-status" class="muted" style="margin:6px 0 10px;">—</div>
 
   <div class="table-wrap">
     <table class="table" id="tbl-params">
@@ -424,12 +781,37 @@
   // ───────── enums/state ─────────
   let ENUMS = { register_types:[], param_modes:[], publish_modes:[] };
   let GENERAL = null;
-  let LINES = [];        // [{name, device, baudrate, timeout, parity, stopbits, port_retry_backoff_s, nodes:[{unit_id, object, num_object, params:[]}]}, ...]
+  let LINES = [];
+  let PARAM_ROWS = [];
+
+  let renderLinesToken = 0;
+  let renderParamsToken = 0;
 
   // ───────── load initial ─────────
   async function loadEnums(){ ENUMS = await apiJson('/api/settings/enums'); }
   async function loadGeneral(){ GENERAL = await apiJson('/api/settings/general'); }
-  async function loadLines(){ LINES = await apiJson('/api/settings/lines'); }
+  async function loadLines(){
+    LINES = await apiJson('/api/settings/lines');
+    rebuildParamIndex();
+  }
+  function rebuildParamIndex(){
+    const flat = [];
+    for (const ln of LINES) {
+      for (const nd of (ln.nodes || [])) {
+        for (const p of (nd.params || [])) {
+          flat.push({
+            line: ln.name,
+            unit_id: nd.unit_id,
+            object: nd.object || '',
+            num_object: nd.num_object,
+            param: p,
+            haystack: `${ln.name} ${nd.unit_id} ${nd.object || ''} ${p.name || ''} ${p.topic || ''} ${p.register_type || ''}`.toLowerCase()
+          });
+        }
+      }
+    }
+    PARAM_ROWS = flat;
+  }
 
   // ───────── render: General ─────────
   function renderGeneral(){
@@ -451,6 +833,28 @@
     qs('#batch_enabled').checked = !!(g.polling.batch_read && g.polling.batch_read.enabled);
     qs('#batch_max_bits').value = (g.polling.batch_read && g.polling.batch_read.max_bits) ?? 64;
     qs('#batch_max_regs').value = (g.polling.batch_read && g.polling.batch_read.max_registers) ?? 60;
+    qs('#poll_inter_request_delay_ms').value = g.polling.inter_request_delay_ms ?? 0;
+    qs('#poll_crc_retry_count').value = g.polling.crc_retry_count ?? 0;
+    qs('#poll_crc_retry_delay_ms').value = g.polling.crc_retry_delay_ms ?? 0;
+    qs('#poll_write_coalesce_ms').value = g.polling.write_coalesce_ms ?? 0;
+    qs('#poll_write_max_tasks').value = g.polling.write_max_tasks ?? 100;
+    qs('#poll_write_max_bits').value = g.polling.write_max_bits ?? 32;
+    qs('#poll_write_max_registers').value = g.polling.write_max_registers ?? 20;
+    qs('#poll_unit_error_skip_s').value = g.polling.unit_error_skip_s ?? 0;
+    qs('#poll_skip_node_on_timeout').checked = !!g.polling.skip_node_on_timeout;
+
+    const fm = g.polling.fast_modbus || {};
+    qs('#fm_enabled').checked = !!fm.enabled;
+    qs('#fm_interval_ms').value = fm.interval_ms ?? 50;
+    qs('#fm_jitter_ms').value = fm.jitter_ms ?? 0;
+    qs('#fm_max_events_per_poll').value = fm.max_events_per_poll ?? 100;
+    qs('#fm_bootstrap_pause_ms').value = fm.bootstrap_pause_ms ?? 20;
+    qs('#fm_rx_gap_ms').value = fm.rx_gap_ms ?? 20;
+    qs('#fm_rx_hard_timeout_ms').value = fm.rx_hard_timeout_ms ?? 350;
+    qs('#fm_poll_idle_sleep_ms').value = fm.poll_idle_sleep_ms ?? 100;
+    qs('#fm_poll_pending_sleep_ms').value = fm.poll_pending_sleep_ms ?? 200;
+    qs('#fm_protocol_debug').checked = !!fm.protocol_debug;
+    qs('#fm_test_enabled').checked = !!fm.test_enabled;
 
     // history
     qs('#hist_rows').value = g.history.max_rows ?? 50000;
@@ -463,6 +867,10 @@
     } else {
       qs('#db_url').value = '';
     }
+
+    // alerts
+    qs('#alerts_http_timeout_s').value = (g.alerts && g.alerts.http_timeout_s) ?? 10;
+    qs('#alerts_insecure_tls').checked = !!(g.alerts && g.alerts.insecure_tls);
 
     // debug
     qs('#dbg_enabled').checked = !!g.debug.enabled;
@@ -509,10 +917,32 @@
         backoff_ms: +qs('#poll_backoff').value,
         max_errors_before_backoff: +qs('#poll_maxerr').value,
         port_retry_backoff_s: +qs('#poll_port_retry').value,
+        inter_request_delay_ms: +qs('#poll_inter_request_delay_ms').value,
+        crc_retry_count: +qs('#poll_crc_retry_count').value,
+        crc_retry_delay_ms: +qs('#poll_crc_retry_delay_ms').value,
+        write_coalesce_ms: +qs('#poll_write_coalesce_ms').value,
+        write_max_tasks: +qs('#poll_write_max_tasks').value,
+        write_max_bits: +qs('#poll_write_max_bits').value,
+        write_max_registers: +qs('#poll_write_max_registers').value,
+        unit_error_skip_s: parseFloat(qs('#poll_unit_error_skip_s').value || '0'),
+        skip_node_on_timeout: qs('#poll_skip_node_on_timeout').checked,
         batch_read: {
           enabled: qs('#batch_enabled').checked,
           max_bits: +qs('#batch_max_bits').value,
           max_registers: +qs('#batch_max_regs').value
+        },
+        fast_modbus: {
+          enabled: qs('#fm_enabled').checked,
+          interval_ms: +qs('#fm_interval_ms').value,
+          jitter_ms: +qs('#fm_jitter_ms').value,
+          max_events_per_poll: +qs('#fm_max_events_per_poll').value,
+          bootstrap_pause_ms: +qs('#fm_bootstrap_pause_ms').value,
+          rx_gap_ms: +qs('#fm_rx_gap_ms').value,
+          rx_hard_timeout_ms: +qs('#fm_rx_hard_timeout_ms').value,
+          poll_idle_sleep_ms: +qs('#fm_poll_idle_sleep_ms').value,
+          poll_pending_sleep_ms: +qs('#fm_poll_pending_sleep_ms').value,
+          protocol_debug: qs('#fm_protocol_debug').checked,
+          test_enabled: qs('#fm_test_enabled').checked
         }
       },
       history: {
@@ -522,6 +952,10 @@
       },
       db: {
         url: qs('#db_url').value.trim()
+      },
+      alerts: {
+        http_timeout_s: +qs('#alerts_http_timeout_s').value,
+        insecure_tls: qs('#alerts_insecure_tls').checked
       },
       debug: {
         enabled: qs('#dbg_enabled').checked,
@@ -558,8 +992,16 @@
 
   // ───────── render: Lines/Nodes ─────────
   function renderLines(){
+    const token = ++renderLinesToken;
+    const statusEl = qs('#lines-status');
+
     elLinesWrap.innerHTML = '';
-    for (const ln of LINES) {
+    statusEl.textContent = `Линий: ${LINES.length}. Подготовка отрисовки...`;
+
+    let index = 0;
+    const chunkSize = 4; // сколько карточек линий рисуем за кадр
+
+    function makeLineCard(ln){
       const card = document.createElement('div');
       card.className = 'card';
       card.dataset.line = ln.name;
@@ -678,8 +1120,30 @@
           </table>
         </div>
       `;
-      elLinesWrap.appendChild(card);
+      return card;
     }
+
+    function step(){
+      if (token !== renderLinesToken) return;
+
+      const frag = document.createDocumentFragment();
+      const end = Math.min(index + chunkSize, LINES.length);
+
+      for (; index < end; index++) {
+        frag.appendChild(makeLineCard(LINES[index]));
+      }
+
+      elLinesWrap.appendChild(frag);
+      statusEl.textContent = `Линий: ${LINES.length}. Отрисовано: ${index} из ${LINES.length}`;
+
+      if (index < LINES.length) {
+        requestAnimationFrame(step);
+      } else {
+        statusEl.textContent = `Линий: ${LINES.length}. Готово.`;
+      }
+    }
+
+    requestAnimationFrame(step);
   }
 
   // ── Линии: события
@@ -719,7 +1183,10 @@
       if(!confirm(`Удалить линию ${line}?`)) return;
       try{
         await apiJson('/api/settings/line/delete', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: line})});
-        await loadLines(); renderLines(); renderFilters(); renderParams();
+        await loadLines();
+        renderLines();
+        renderFilters();
+        renderParams();
         showToast('Линия удалена');
       }catch(e){ showToast(e.message); }
     }
@@ -761,7 +1228,10 @@
           });
           showToast('Узел сохранён');
         }
-        await loadLines(); renderLines(); renderFilters(); renderParams();
+        await loadLines();
+        renderLines();
+        renderFilters();
+        renderParams();
       }catch(e){ showToast(e.message); }
     }
 
@@ -774,7 +1244,10 @@
           method:'DELETE', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ line, unit_id })
         });
-        await loadLines(); renderLines(); renderFilters(); renderParams();
+        await loadLines();
+        renderLines();
+        renderFilters();
+        renderParams();
         showToast('Узел удалён');
       }catch(e){ showToast(e.message); }
     }
@@ -797,8 +1270,10 @@
   // ───────── render: Params table ─────────
   function renderFilters(){
     const sel = qs('#filter_line');
+    const cur = sel.value;
     sel.innerHTML = '<option value="">Все линии</option>' +
-      LINES.map(ln=> `<option>${escHtml(ln.name)}</option>`).join('');
+      LINES.map(ln=> `<option value="${escHtml(ln.name)}">${escHtml(ln.name)}</option>`).join('');
+    if (!cur || LINES.some(x => x.name === cur)) sel.value = cur;
   }
 
   function rowHtml(lineName, unit, object, p){
@@ -835,24 +1310,54 @@
       </tr>`;
   }
 
-
   function renderParams(){
+    const token = ++renderParamsToken;
     const tbody = qs('#tbody-params');
+    const statusEl = qs('#params-status');
+
     const fl = qs('#filter_line').value;
     const q = qs('#filter_q').value.trim().toLowerCase();
-    const rows = [];
 
-    for(const ln of LINES){
-      if(fl && ln.name !== fl) continue;
-      for(const nd of (ln.nodes || [])){
-        for(const p of (nd.params || [])){
-          const hay = `${ln.name} ${nd.unit_id} ${nd.object} ${p.name} ${p.topic||''}`.toLowerCase();
-          if(q && !hay.includes(q)) continue;
-          rows.push(rowHtml(ln.name, nd.unit_id, nd.object, p));
-        }
+    const filtered = PARAM_ROWS.filter(x => {
+      if (fl && x.line !== fl) return false;
+      if (q && !x.haystack.includes(q)) return false;
+      return true;
+    });
+
+    tbody.innerHTML = '';
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="20" class="center muted">нет параметров</td></tr>`;
+      statusEl.textContent = `Параметров найдено: 0`;
+      return;
+    }
+
+    statusEl.textContent = `Параметров найдено: ${filtered.length}. Подготовка отрисовки...`;
+
+    let index = 0;
+    const chunkSize = 120; // сколько строк рисуем за кадр
+
+    function step(){
+      if (token !== renderParamsToken) return;
+
+      const end = Math.min(index + chunkSize, filtered.length);
+      let html = '';
+
+      for (; index < end; index++) {
+        const x = filtered[index];
+        html += rowHtml(x.line, x.unit_id, x.object, x.param);
+      }
+
+      tbody.insertAdjacentHTML('beforeend', html);
+      statusEl.textContent = `Параметров найдено: ${filtered.length}. Отрисовано: ${index} из ${filtered.length}`;
+
+      if (index < filtered.length) {
+        requestAnimationFrame(step);
+      } else {
+        statusEl.textContent = `Параметров найдено: ${filtered.length}. Готово.`;
       }
     }
-    tbody.innerHTML = rows.join('') || `<tr><td colspan="20" class="center muted">нет параметров</td></tr>`;
+
+    requestAnimationFrame(step);
   }
 
   // ───────── модалка add/edit ─────────
@@ -1091,8 +1596,15 @@
   qs('#m_btn_save').onclick = ()=> saveModal().catch(e=> showToast(e.message));
   qs('#m_line2').onchange = fillNodesBySelectedLine;
 
-  qs('#filter_line').onchange = renderParams;
-  qs('#filter_q').oninput = ()=> { renderParams(); };
+  qs('#filter_line').onchange = ()=> { renderParams(); };
+
+  let paramsSearchTimer = null;
+  qs('#filter_q').oninput = ()=> {
+    clearTimeout(paramsSearchTimer);
+    paramsSearchTimer = setTimeout(() => {
+      renderParams();
+    }, 250);
+  };
 
   // ─── Экспорт / Импорт XLSX
   qs('#btn-export-xlsx').onclick = async ()=>{
@@ -1128,13 +1640,18 @@
   // ───────── bootstrap ─────────
   (async function(){
     try{
-      await loadEnums();
-      await loadGeneral();
-      await loadLines();
+      const [enums, general] = await Promise.all([
+        loadEnums(),
+        loadGeneral()
+      ]);
+
       renderGeneral();
-      renderLines();
+
+      await loadLines();
       renderFilters();
-      renderParams();
+
+      requestAnimationFrame(() => renderLines());
+      requestAnimationFrame(() => renderParams());
     }catch(e){
       showToast('Ошибка инициализации: ' + e.message);
     }

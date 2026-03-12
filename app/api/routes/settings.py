@@ -248,6 +248,7 @@ def get_general():
     return {
         "mqtt": cfg.get("mqtt", {}),
         "db": cfg.get("db", {"url": "sqlite:///./data/data.db"}),
+        "alerts": cfg.get("alerts", {"insecure_tls": False, "http_timeout_s": 10}),
         "history": cfg.get("history", {}),
         "debug": cfg.get("debug", {}),
         "serial": cfg.get("serial", {"echo": False}),
@@ -262,13 +263,14 @@ def get_general():
 @router.put("/general")
 def put_general(body: Dict[str, Any]):
     # требуем ключевые секции
-    for k in ("mqtt", "db", "polling", "history", "debug", "serial", "addressing", "backups", "service", "andromeda", "current"):
+    for k in ("mqtt", "db", "alerts", "polling", "history", "debug", "serial", "addressing", "backups", "service", "andromeda", "current"):
         if k not in body:
             raise HTTPException(400, f"Missing section in body: {k}")
 
     cfg = _cfg()
     cfg["mqtt"] = body["mqtt"] or {}
     cfg["db"] = body["db"] or {"url": "sqlite:///./data/data.db"}
+    cfg["alerts"] = body["alerts"] or {"insecure_tls": False, "http_timeout_s": 10}
     cfg["polling"] = body["polling"] or {}
     cfg["history"] = body["history"] or {}
     cfg["debug"] = body["debug"] or {}

@@ -276,6 +276,13 @@ class ModbusLine(threading.Thread):
         self._no_reply: Dict[int, int] = {}           # счётчик неответов по unit_id
         self._stats = defaultdict(int)                # (unit,"read_ok"/"read_err")->int
 
+        # cooldown для unit_id после hard-error/timeout
+        self._unit_skip_until: Dict[int, float] = {}
+
+        # настройки деградации по неответам slave
+        self.unit_error_skip_s: float = float(self.poll.get("unit_error_skip_s", 1.0) or 1.0)
+        self.skip_node_on_timeout: bool = bool(self.poll.get("skip_node_on_timeout", True))
+
         # Подписка на команды записи (…/on) для rw-параметров
         self._setup_command_subscriptions()
 
@@ -294,19 +301,96 @@ class ModbusLine(threading.Thread):
     # ───────────────────────── общая жизнедеятельность ─────────────────────────
     def stop(self):
         self._stop.set()
+        self.log.info("stop requested")
+
         # RTU-инструменты
-        for inst in self._instruments.values():
+        for unit_id, inst in list(self._instruments.items()):
             try:
-                if getattr(inst, "serial", None):
-                    inst.serial.close()
+                ser = getattr(inst, "serial", None)
+                if ser:
+                    try:
+                        ser.cancel_read()
+                    except Exception:
+                        pass
+                    try:
+                        ser.cancel_write()
+                    except Exception:
+                        pass
+                    try:
+                        ser.reset_input_buffer()
+                    except Exception:
+                        pass
+                    try:
+                        ser.reset_output_buffer()
+                    except Exception:
+                        pass
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
             except Exception:
                 pass
+
         # TCP-клиент
         if self._tcp_client is not None:
             try:
                 self._tcp_client.close()
             except Exception:
                 pass
+
+    def _mark_port_broken(
+        self,
+        reason: str,
+        inst: Optional[minimalmodbus.Instrument] = None,
+        unit_id: Optional[int] = None,
+    ) -> None:
+        """
+        Централизованно помечаем COM-порт как сломанный, закрываем serial,
+        удаляем instrument(ы) и включаем backoff на переоткрытие.
+        """
+        self._port_fault = True
+        self._port_retry_at = _now_ms() + self._port_retry_backoff
+
+        # 1) закрыть конкретный inst, если передали
+        if inst is not None:
+            try:
+                ser = getattr(inst, "serial", None)
+                if ser is not None:
+                    ser.close()
+            except Exception:
+                pass
+
+        # 2) если известен unit_id — убрать только его instrument
+        if unit_id is not None:
+            try:
+                inst2 = self._instruments.pop(int(unit_id), None)
+                if inst2 is not None:
+                    try:
+                        ser2 = getattr(inst2, "serial", None)
+                        if ser2 is not None:
+                            ser2.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        else:
+            # 3) иначе закрыть и очистить всё по линии
+            try:
+                for uid, instx in list(self._instruments.items()):
+                    try:
+                        serx = getattr(instx, "serial", None)
+                        if serx is not None:
+                            serx.close()
+                    except Exception:
+                        pass
+                self._instruments.clear()
+            except Exception:
+                pass
+
+        self.log.warning(
+            f"port marked broken [{self.port}] reason={reason}; "
+            f"retry in {self._port_retry_backoff:.1f}s"
+        )
 
     def _do_write_task(self, t: dict) -> None:
         """Выполнить одну задачу записи (владение портом под локом)."""
@@ -320,33 +404,40 @@ class ModbusLine(threading.Thread):
         raw = int(round(num / _safe_scale(p.scale)))
         addr = self._normalize_addr(p)
 
-        with self._io_lock:  # <<< ключевой момент: сериализация транзакций
-            if self.transport == "tcp":
-                # Modbus TCP
-                if p.register_type == "coil":
-                    r = inst.write_coil(
-                        address=addr,
-                        value=1 if raw != 0 else 0,
-                        slave=unit_id,
-                    )
-                elif p.register_type == "holding":
-                    r = inst.write_register(
-                        address=addr,
-                        value=raw,
-                        slave=unit_id,
-                    )
+        try:
+            with self._io_lock:  # <<< ключевой момент: сериализация транзакций
+                if self.transport == "tcp":
+                    # Modbus TCP
+                    if p.register_type == "coil":
+                        r = inst.write_coil(
+                            address=addr,
+                            value=1 if raw != 0 else 0,
+                            slave=unit_id,
+                        )
+                    elif p.register_type == "holding":
+                        r = inst.write_register(
+                            address=addr,
+                            value=raw,
+                            slave=unit_id,
+                        )
+                    else:
+                        raise RuntimeError(f"write unsupported for type={p.register_type}")
+                    if hasattr(r, "isError") and r.isError():
+                        raise ModbusException(r)
                 else:
-                    raise RuntimeError(f"write unsupported for type={p.register_type}")
-                if hasattr(r, "isError") and r.isError():
-                    raise ModbusException(r)
-            else:
-                # RTU / minimalmodbus
-                if p.register_type == "coil":
-                    inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
-                elif p.register_type == "holding":
-                    inst.write_register(addr, raw, functioncode=6, signed=False)
-                else:
-                    raise RuntimeError(f"write unsupported for type={p.register_type}")
+                    # RTU / minimalmodbus
+                    if p.register_type == "coil":
+                        inst.write_bit(addr, 1 if raw != 0 else 0, functioncode=5)
+                    elif p.register_type == "holding":
+                        inst.write_register(addr, raw, functioncode=6, signed=False)
+                    else:
+                        raise RuntimeError(f"write unsupported for type={p.register_type}")
+        except serial.serialutil.SerialException as e:
+            self._mark_port_broken(f"write serial exception: {e}", inst=inst, unit_id=unit_id)
+            raise
+        except OSError as e:
+            self._mark_port_broken(f"write os error: {e}", inst=inst, unit_id=unit_id)
+            raise
 
         self._no_reply[unit_id] = 0
         self._stats[(unit_id, "read_ok")] += 1  # условно считаем успешную операцию
@@ -358,6 +449,21 @@ class ModbusLine(threading.Thread):
         d = float(getattr(self, "inter_request_delay_s", 0.0) or 0.0)
         if d > 0:
             time.sleep(d)
+
+    def _mark_unit_no_reply(self, unit_id: int, code: int, msg: str) -> None:
+        """
+        Помечает unit как проблемный.
+        Для timeout/port busy/unknown error включаем короткий cooldown,
+        чтобы не мучать slave до следующего круга.
+        """
+        self._no_reply[unit_id] = self._no_reply.get(unit_id, 0) + 1
+
+        if code in (1, 7, 12):  # TIMEOUT / PORT_BUSY / UNKNOWN_ERROR
+            self._unit_skip_until[unit_id] = _now_ms() + self.unit_error_skip_s
+
+    def _unit_is_temporarily_skipped(self, unit_id: int) -> bool:
+        until = float(self._unit_skip_until.get(unit_id, 0.0) or 0.0)
+        return until > _now_ms()
 
     # ───────────────────────── MQTT вспомогательные ────────────────────────────
     def _pub_topic_for(self, nd: NodeCfg, p: ParamCfg) -> str:
@@ -1110,7 +1216,17 @@ class ModbusLine(threading.Thread):
         # ───────────── RTU по COM (как было) ─────────────
         inst = self._instruments.get(unit_id)
         if inst:
-            return inst
+            try:
+                ser = getattr(inst, "serial", None)
+                if ser is not None and getattr(ser, "is_open", True):
+                    return inst
+            except Exception:
+                pass
+
+            try:
+                self._instruments.pop(unit_id, None)
+            except Exception:
+                pass
 
         try:
             port_name = self.port
@@ -1126,6 +1242,7 @@ class ModbusLine(threading.Thread):
             inst = minimalmodbus.Instrument(port_name, unit_id, mode=minimalmodbus.MODE_RTU)
             inst.serial.baudrate = self.baudrate
             inst.serial.timeout = self.timeout
+            inst.serial.write_timeout = max(0.2, float(self.timeout))
             inst.serial.bytesize = 8
             inst.serial.parity = {
                 'N': serial.PARITY_NONE,
@@ -1312,26 +1429,15 @@ class ModbusLine(threading.Thread):
         except Exception as e:
             code, msg = self._map_ex(e)
 
-            # если проблемы с дескриптором/портом — сбросим инстанс, чтобы _inst() открыл заново
             s = str(e).lower()
-            if ("неверный дескриптор" in s) or ("bad file descriptor" in s) or ("writefile failed" in s):
-                # 1) закрыть текущий serial
-                try:
-                    ser = getattr(inst, "serial", None)
-                    if ser:
-                        ser.close()
-                except Exception:
-                    pass
-
-                # 2) удалить instrument строго по unit_id
-                try:
-                    self._instruments.pop(int(unit_id), None)
-                except Exception:
-                    pass
-
-                # 3) принудительно пометить порт как fault, чтобы _inst() переоткрылся
-                self._port_fault = True
-                self._port_retry_at = _now_ms() + self._port_retry_backoff
+            if (
+                ("неверный дескриптор" in s)
+                or ("bad file descriptor" in s)
+                or ("writefile failed" in s)
+                or ("device not functioning" in s)
+                or ("i/o error" in s)
+            ):
+                self._mark_port_broken(reason=s, inst=inst, unit_id=unit_id)
 
             if self.debug.get("enabled"):
                 self.log.error(f"{p.name}: read error at {p.register_type}[{addr}] → {e}")
@@ -1618,11 +1724,37 @@ class ModbusLine(threading.Thread):
             if (now - t0) >= hard_timeout_s:
                 break
 
-            b = ser.read(1)
+            # Сначала проверяем, есть ли что читать, чтобы не зависать лишний раз в read(1)
+            try:
+                waiting = int(getattr(ser, "in_waiting", 0) or 0)
+            except Exception:
+                waiting = 0
+
+            if waiting <= 0:
+                # если уже что-то приняли и выдержали gap — считаем пакет завершённым
+                if buf and last_rx and (now - last_rx) >= gap_s:
+                    break
+
+                time.sleep(0.001)
+                continue
+
+            try:
+                chunk = ser.read(min(waiting, max(1, max_bytes - len(buf))))
+            except serial.serialutil.SerialException as e:
+                self._mark_port_broken(f"fast read serial exception: {e}")
+                break
+            except OSError as e:
+                self._mark_port_broken(f"fast read os error: {e}")
+                break
+            except Exception as e:
+                # Не всякая ошибка = смерть порта, но логируем
+                self.log.error(f"FAST read blob error: {e}")
+                break
+
             now = time.time()
 
-            if b:
-                buf += b
+            if chunk:
+                buf += chunk
                 last_rx = now
                 if len(buf) >= max_bytes:
                     break
@@ -1808,6 +1940,14 @@ class ModbusLine(threading.Thread):
                     ser.flush()
                     if self.fast_protocol_debug:
                         self.log.info(f"FAST CFG unit={unit_id} TX: {frame.hex(' ')}")
+                except serial.serialutil.SerialException as e:
+                    self._mark_port_broken(f"fast cfg serial exception: {e}", unit_id=unit_id)
+                    self.log.error(f"FAST CFG unit={unit_id} write error: {e}")
+                    return
+                except OSError as e:
+                    self._mark_port_broken(f"fast cfg os error: {e}", unit_id=unit_id)
+                    self.log.error(f"FAST CFG unit={unit_id} write error: {e}")
+                    return
                 except Exception as e:
                     self.log.error(f"FAST CFG unit={unit_id} write error: {e}")
                     continue
@@ -2002,6 +2142,18 @@ class ModbusLine(threading.Thread):
 
                 if self.fast_protocol_debug:
                     self.log.info(f"FAST POLL TX: {frame.hex(' ')}")
+            except serial.serialutil.SerialException as e:
+                self._mark_port_broken(f"fast poll serial exception: {e}")
+                self.log.error(f"FAST POLL write error: {e}")
+                self._fast_last_poll_ts = _now_ms()
+                self._fast_next_poll_sleep_s = self.fast_poll_idle_sleep_s
+                return []
+            except OSError as e:
+                self._mark_port_broken(f"fast poll os error: {e}")
+                self.log.error(f"FAST POLL write error: {e}")
+                self._fast_last_poll_ts = _now_ms()
+                self._fast_next_poll_sleep_s = self.fast_poll_idle_sleep_s
+                return []
             except Exception as e:
                 self.log.error(f"FAST POLL write error: {e}")
                 self._fast_last_poll_ts = _now_ms()
@@ -2381,8 +2533,13 @@ class ModbusLine(threading.Thread):
 
             loop_start = _now_ms()
             for nd in self.nodes:
+                if self._stop.is_set():
+                    break
                 # Запомним текущий unit_id для TCP-операций
                 self._current_unit_id = nd.unit_id
+
+                if self._unit_is_temporarily_skipped(nd.unit_id):
+                    continue
 
                 inst = self._inst(nd.unit_id)
                 if inst is None:
@@ -2405,6 +2562,8 @@ class ModbusLine(threading.Thread):
                             pass
 
                     for rtype, start, count, group_params in blocks:
+                        if self._stop.is_set():
+                            break
                         if self.debug.get("enabled"):
                             fc = _func_code(rtype)
                             raw_first = group_params[0].address if group_params else start
@@ -2444,6 +2603,7 @@ class ModbusLine(threading.Thread):
                                 self._last_ok_ts[key] = now
                                 self._last_attempt_ts[key] = now
                                 self._no_reply[nd.unit_id] = 0
+                                self._unit_skip_until.pop(nd.unit_id, None)
                                 self._stats[(nd.unit_id, "read_ok")] += 1
 
                                 if self.debug.get("log_reads"):
@@ -2501,6 +2661,7 @@ class ModbusLine(threading.Thread):
                                         self._last_ok_ts[key] = now
                                         self._last_attempt_ts[key] = now
                                         self._no_reply[nd.unit_id] = 0
+                                        self._unit_skip_until.pop(nd.unit_id, None)
                                         self._stats[(nd.unit_id, "read_ok")] += 1
                                         self._maybe_publish(nd, p, val, 0, "OK", self._last_ok_ts[key], self._last_attempt_ts[key])
 
@@ -2526,7 +2687,7 @@ class ModbusLine(threading.Thread):
                                         "а также лимиты batch_read.max_bits/regs."
                                     )
 
-                            self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
+                            self._mark_unit_no_reply(nd.unit_id, code, msg)
                             for i, p in enumerate(group_params):
                                 key = self._make_key(nd.unit_id, p.name)
                                 now = _now_ms()
@@ -2536,6 +2697,10 @@ class ModbusLine(threading.Thread):
 
                             if self._no_reply[nd.unit_id] >= max_err:
                                 time.sleep(backoff_ms)
+
+                            if self.skip_node_on_timeout and code in (1, 7, 12):
+                                # не мучаем этот slave дальше в текущем проходе
+                                break
 
                         finally:
                             self._inter_delay()
@@ -2547,6 +2712,8 @@ class ModbusLine(threading.Thread):
 
                     # дочитываем параметры с words > 1 одиночными чтениями
                     for p in (pp for pp in nd.params if int(getattr(pp, "words", 1) or 1) > 1):
+                        if self._stop.is_set():
+                            break
                         key = self._make_key(nd.unit_id, p.name)
 
                         if self.debug.get("enabled"):
@@ -2562,13 +2729,17 @@ class ModbusLine(threading.Thread):
                         self._last_attempt_ts[key] = now
 
                         if val is None:
-                            self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
+                            self._mark_unit_no_reply(nd.unit_id, code, msg)
                             self._stats[(nd.unit_id, "read_err")] += 1
                             self._maybe_publish(nd, p, None, code, msg, self._last_ok_ts.get(key), now)
                             if self._no_reply[nd.unit_id] >= max_err:
                                 time.sleep(backoff_ms)
+
+                            if self.skip_node_on_timeout and code in (1, 7, 12):
+                                break
                         else:
                             self._no_reply[nd.unit_id] = 0
+                            self._unit_skip_until.pop(nd.unit_id, None)
                             self._stats[(nd.unit_id, "read_ok")] += 1
                             self._last_ok_ts[key] = now
                             self._maybe_publish(nd, p, val, 0, "OK", self._last_ok_ts[key], now)
@@ -2589,6 +2760,8 @@ class ModbusLine(threading.Thread):
                     except Exception:
                         pass
                 for p in nd.params:
+                    if self._stop.is_set():
+                        break
 
                     if self.debug.get("enabled"):
                         fc = _func_code(p.register_type)
@@ -2616,13 +2789,17 @@ class ModbusLine(threading.Thread):
                     now = _now_ms()
                     self._last_attempt_ts[key] = now
                     if val is None:
-                        self._no_reply[nd.unit_id] = self._no_reply.get(nd.unit_id, 0) + 1
+                        self._mark_unit_no_reply(nd.unit_id, code, msg)
                         self._stats[(nd.unit_id, "read_err")] += 1
                         self._maybe_publish(nd, p, None, code, msg, self._last_ok_ts.get(key), now)
                         if self._no_reply[nd.unit_id] >= max_err:
                             time.sleep(backoff_ms)
+
+                        if self.skip_node_on_timeout and code in (1, 7, 12):
+                            break
                     else:
                         self._no_reply[nd.unit_id] = 0
+                        self._unit_skip_until.pop(nd.unit_id, None)
                         self._stats[(nd.unit_id, "read_ok")] += 1
                         self._last_ok_ts[key] = now
                         self._maybe_publish(nd, p, val, 0, "OK", self._last_ok_ts[key], now)

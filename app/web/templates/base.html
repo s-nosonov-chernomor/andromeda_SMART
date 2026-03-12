@@ -19,7 +19,10 @@
 
   <!-- top nav -->
   <nav class="nav" role="navigation" aria-label="Главное меню">
-    <div class="brand">SMART PERSAY</div>
+    <div class="brand">
+      {{ app_name }}
+
+    </div>
 
     <div class="links" id="nav-left">
       <a href="/current"   data-path="/current">текущие</a>
@@ -169,6 +172,11 @@
   </script>
 
   <!-- ВАЖНО: страничный JS сюда -->
+  <footer class="container" style="padding-top:8px; padding-bottom:18px;">
+    <div class="muted">{{ app_name }} v{{ app_version }}</div>
+  </footer>
+
+  <!-- ВАЖНО: страничный JS сюда -->
   {% block scripts %}{% endblock %}
 </body>
-</html>
+</html></html>

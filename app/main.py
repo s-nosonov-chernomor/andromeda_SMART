@@ -64,6 +64,9 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_s
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+templates.env.globals["app_name"] = settings.app_name
+templates.env.globals["app_version"] = settings.app_version
+
 @app.exception_handler(UiAuthRequired)
 async def handle_ui_auth_required(request: Request, exc: UiAuthRequired):
     next_url = exc.next_url or "/current"
