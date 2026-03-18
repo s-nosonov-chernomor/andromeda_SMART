@@ -287,7 +287,7 @@ class ModbusLine(threading.Thread):
         self._setup_command_subscriptions()
 
         # Флаг остановки
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
 
         self._bands: Dict[str, Tuple[float, float]] = {}  # key -> (low_adj, high_adj)
 
@@ -300,7 +300,7 @@ class ModbusLine(threading.Thread):
 
     # ───────────────────────── общая жизнедеятельность ─────────────────────────
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
         self.log.info("stop requested")
 
         # RTU-инструменты
@@ -2506,7 +2506,7 @@ class ModbusLine(threading.Thread):
         t_summary = _now_ms()
         summary_every = int(self.debug.get("summary_every_s", 0))
 
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
 
             # 0) приоритетно выполняем накопившиеся записи
             tasks = self._collect_write_tasks()
