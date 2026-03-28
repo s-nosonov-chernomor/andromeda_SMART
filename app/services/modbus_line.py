@@ -2533,7 +2533,7 @@ class ModbusLine(threading.Thread):
 
             loop_start = _now_ms()
             for nd in self.nodes:
-                if self._stop.is_set():
+                if self._stop_event.is_set():
                     break
                 # Запомним текущий unit_id для TCP-операций
                 self._current_unit_id = nd.unit_id
@@ -2562,7 +2562,7 @@ class ModbusLine(threading.Thread):
                             pass
 
                     for rtype, start, count, group_params in blocks:
-                        if self._stop.is_set():
+                        if self._stop_event.is_set():
                             break
                         if self.debug.get("enabled"):
                             fc = _func_code(rtype)
@@ -2712,7 +2712,7 @@ class ModbusLine(threading.Thread):
 
                     # дочитываем параметры с words > 1 одиночными чтениями
                     for p in (pp for pp in nd.params if int(getattr(pp, "words", 1) or 1) > 1):
-                        if self._stop.is_set():
+                        if self._stop_event.is_set():
                             break
                         key = self._make_key(nd.unit_id, p.name)
 
@@ -2760,7 +2760,7 @@ class ModbusLine(threading.Thread):
                     except Exception:
                         pass
                 for p in nd.params:
-                    if self._stop.is_set():
+                    if self._stop_event.is_set():
                         break
 
                     if self.debug.get("enabled"):
